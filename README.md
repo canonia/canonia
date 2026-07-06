@@ -37,4 +37,4 @@ inverts that:
 
 ## License
 
-[MIT](./LICENSE) © 2026 André Lopes
+[Apache-2.0](./LICENSE) © 2026 André Lopes

@@ -12,7 +12,7 @@
     "documentation",
     "single-source-of-truth"
   ],
-  "license": "MIT",
+  "license": "Apache-2.0",
   "author": "André Lopes <andre.luis.lopes81@gmail.com>",
   "homepage": "https://github.com/canonia/canonia#readme",
   "repository": {
