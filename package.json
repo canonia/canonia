@@ -1,0 +1,28 @@
+{
+  "name": "canonia",
+  "version": "0.0.1",
+  "description": "A git-backed, MCP-served knowledge graph for AI coding agents. Pre-alpha — name reserved, framework in active design.",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "knowledge-graph",
+    "ai",
+    "agents",
+    "claude",
+    "documentation",
+    "single-source-of-truth"
+  ],
+  "license": "MIT",
+  "author": "André Lopes <andre.luis.lopes81@gmail.com>",
+  "homepage": "https://github.com/canonia/canonia#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/canonia/canonia.git"
+  },
+  "bugs": {
+    "url": "https://github.com/canonia/canonia/issues"
+  },
+  "files": [
+    "README.md"
+  ]
+}

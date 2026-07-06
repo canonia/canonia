@@ -1,0 +1,13 @@
+# Node
+node_modules/
+npm-debug.log*
+
+# Python
+__pycache__/
+*.egg-info/
+build/
+dist/
+.venv/
+
+# OS
+.DS_Store

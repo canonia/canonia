@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "canonia"
+version = "0.0.1"
+description = "A git-backed, MCP-served knowledge graph for AI coding agents. Pre-alpha — name reserved, framework in active design."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "André Lopes", email = "andre.luis.lopes81@gmail.com" }]
+keywords = ["mcp", "knowledge-graph", "ai", "agents", "documentation"]
+
+[project.urls]
+Homepage = "https://github.com/canonia/canonia"
+Repository = "https://github.com/canonia/canonia"
+Issues = "https://github.com/canonia/canonia/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
