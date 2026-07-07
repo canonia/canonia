@@ -63,16 +63,16 @@ def test_build_site_produces_pages_and_index(tmp_path: Path):
     assert (out / "style.css").exists()
     assert result["live"] == 2
 
-    ci = (out / "c" / "ci.html").read_text()
+    ci = (out / "c" / "ci.html").read_text(encoding="utf-8")
     # backlink from testing -> ci is rendered
     assert "testing.html" in ci
     # body wikilink resolved
     assert '<a href="testing.html">Testing</a>' in ci
 
-    index = (out / "index.html").read_text()
+    index = (out / "index.html").read_text(encoding="utf-8")
     assert "testcanon" in index and "Continuous integration" in index
 
-    records = json.loads((out / "search.json").read_text())
+    records = json.loads((out / "search.json").read_text(encoding="utf-8"))
     assert {r["id"] for r in records} == {"ci", "testing"}
 
 
@@ -87,14 +87,14 @@ def test_build_site_banners_and_archived_handling(tmp_path: Path):
     out = tmp_path / "site"
     build_site(tmp_path, out_dir=out)
 
-    assert "Merged — redirects to" in (out / "c" / "cicd.html").read_text()
-    assert "Deprecated." in (out / "c" / "testing.html").read_text()
+    assert "Merged — redirects to" in (out / "c" / "cicd.html").read_text(encoding="utf-8")
+    assert "Deprecated." in (out / "c" / "testing.html").read_text(encoding="utf-8")
     assert (out / "c" / "old.html").exists()          # archived page still generated
 
-    index = (out / "index.html").read_text()
+    index = (out / "index.html").read_text(encoding="utf-8")
     assert "CI/CD" not in index                        # merged excluded from browse
     assert ">Old<" not in index                        # archived excluded from browse
 
-    records = {r["id"]: r for r in json.loads((out / "search.json").read_text())}
+    records = {r["id"]: r for r in json.loads((out / "search.json").read_text(encoding="utf-8"))}
     assert "cicd" not in records                        # tombstone not searchable
     assert records["old"]["status"] == "archived"       # archived still searchable

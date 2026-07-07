@@ -49,7 +49,10 @@ select = ["E", "F", "I", "W", "B"]
 ignore = ["E501"]
 
 [tool.mypy]
-python_version = "3.9"
+# No python_version pin: mypy follows the running interpreter. Pinning 3.9 makes
+# recent mypy choke parsing numpy 2.x's 3.12-syntax stubs (and newer mypy refuses
+# to target 3.9 at all). The 3.9 floor is guarded elsewhere — ruff's
+# target-version = py39 and the py3.9 pytest job.
 files = ["src/canonia"]
 # Pragmatic gate: catch real type errors without demanding exhaustive
 # annotations. Untyped function bodies are skipped by default (no strict mode).

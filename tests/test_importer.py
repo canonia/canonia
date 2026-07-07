@@ -101,9 +101,9 @@ def test_curated_is_idempotent(tmp_path: Path):
     mapping = _mapping(tmp_path)
     out = tmp_path / "out"
     import_curated(mapping, repos).write(out)
-    first = {p.name: p.read_text() for p in out.rglob("*.md")}
+    first = {p.name: p.read_text(encoding="utf-8") for p in out.rglob("*.md")}
     import_curated(mapping, repos).write(out)
-    second = {p.name: p.read_text() for p in out.rglob("*.md")}
+    second = {p.name: p.read_text(encoding="utf-8") for p in out.rglob("*.md")}
     assert first == second
 
 
