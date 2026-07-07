@@ -4,13 +4,25 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "canonia"
-version = "0.1.0.dev0"
+version = "0.1.0"
 description = "A git-backed, MCP-served knowledge graph for AI coding agents."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "Apache-2.0" }
 authors = [{ name = "André Lopes", email = "andre.luis.lopes81@gmail.com" }]
 keywords = ["mcp", "knowledge-graph", "ai", "agents", "documentation"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Documentation",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = ["PyYAML>=6.0"]
 
 [project.optional-dependencies]

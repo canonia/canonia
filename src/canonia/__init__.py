@@ -13,7 +13,7 @@ importer (``canonia import``), the MCP server (``canonia serve``), the static si
 ``canonia[semantic]`` extra). Governance/access control is a future module.
 """
 
-__version__ = "0.1.0.dev0"
+__version__ = "0.1.0"
 
 from canonia.schema import Concept, ValidationError
 
