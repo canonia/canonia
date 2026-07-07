@@ -10,6 +10,13 @@
 - Runtime dependency: **PyYAML** only. The optional semantic index adds `numpy` +
   `onnxruntime` (the `[semantic]` extra) — everything else stays dependency-free.
 
+> **On Python 3.9:** the *base* install (PyYAML + stdlib) is fully supported. The
+> **`[semantic]` extra effectively wants Python ≥ 3.10**, though — `numpy` dropped
+> 3.9 in 2.1, so on 3.9 pip pins you to older `numpy`/`onnxruntime` wheels (and
+> that window keeps shrinking). 3.9 is also end-of-life (Oct 2025). If you rely on
+> semantic search, prefer 3.10+; if you only need the schema/importer/server/site,
+> 3.9 is fine.
+
 ## Install
 
 ```bash

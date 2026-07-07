@@ -16,6 +16,11 @@ extra installed, search silently falls back to keyword-only.
 pip install 'canonia[semantic]'      # numpy + onnxruntime
 ```
 
+> **Prefer Python ≥ 3.10 for the extra.** Canonia's base install supports 3.9, but
+> `numpy` dropped 3.9 in 2.1, so on 3.9 you're pinned to older `numpy`/`onnxruntime`
+> wheels (a window that keeps narrowing, and 3.9 is EOL since Oct 2025). Keyword
+> search still works on 3.9 with no extra at all.
+
 The first `canonia index build` downloads the model (all-MiniLM-L6-v2, ~23 MB
 quantized ONNX) into `~/.cache/canonia/models/` (override with `$CANONIA_MODEL_DIR`).
 After that it runs fully offline.
