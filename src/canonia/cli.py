@@ -135,6 +135,9 @@ def cmd_import(args) -> int:
         print(plan.render_report(committed=False))
         print(f"\n(dry-run — no files written; re-run with --commit to write to {out_dir})")
 
+    if getattr(args, "check_dupes", False):
+        _report_dupes(plan, config, out_dir, args.dupe_threshold)
+
     print()
     if issues:
         print(f"Gates: {len(issues)} issue(s) — schema / dangling-reference:", file=sys.stderr)
@@ -142,6 +145,50 @@ def cmd_import(args) -> int:
         return 1
     print(f"Gates: OK — {len(graph)} concepts, schema + dangling-reference passed.")
     return 0
+
+
+def _report_dupes(plan: ImportPlan, config, out_dir: Path, threshold: float) -> None:
+    """Advisory semantic near-duplicate check over the import (never fails it)."""
+    from canonia import index
+
+    if not index.deps_available():
+        print(
+            "\n  ! --check-dupes skipped: needs the extra (pip install 'canonia[semantic]')",
+            file=sys.stderr,
+        )
+        return
+    new_concepts = [e.concept for e in plan.emitted]
+    if not new_concepts:
+        return
+    # Compare against concepts already in the target canon, if any exist on disk.
+    existing = []
+    if out_dir.exists():
+        emitted_ids = {c.id for c in new_concepts}
+        existing = [c for c in Graph.load(out_dir).concepts.values() if c.id not in emitted_ids]
+    try:
+        model = index.load_model(config) if config else None
+        if model is None:
+            print("\n  ! --check-dupes skipped: no canonia.yml to locate the model", file=sys.stderr)
+            return
+        pairs = index.near_duplicates(new_concepts, model, existing=existing, threshold=threshold)
+    except Exception as exc:  # model download/load failure shouldn't sink the import
+        print(f"\n  ! --check-dupes skipped: {exc}", file=sys.stderr)
+        return
+
+    print(f"\nDuplicate check (cosine ≥ {threshold}):")
+    if not pairs:
+        print("  none — no near-duplicate concepts found.")
+        return
+    within = [p for p in pairs if p.kind == "within-import"]
+    vs_canon = [p for p in pairs if p.kind == "vs-canon"]
+    if within:
+        print(f"  {len(within)} within this import (candidates to merge/dedup in mapping.yml):")
+        for p in within:
+            print(f"    {p.score:.3f}  {p.a_id}  ~  {p.b_id}")
+    if vs_canon:
+        print(f"  {len(vs_canon)} vs. existing canon (already covered? review before committing):")
+        for p in vs_canon:
+            print(f"    {p.score:.3f}  {p.a_id}  ~  {p.b_id} (existing)")
 
 
 def cmd_validate(args) -> int:
@@ -312,6 +359,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_imp.add_argument("--canon", help="canon dir (for canonia.yml); default: search from cwd")
     p_imp.add_argument("--out", help="output concepts dir (default: canon's concepts/)")
     p_imp.add_argument("--commit", action="store_true", help="write files (default: dry-run)")
+    p_imp.add_argument(
+        "--check-dupes", dest="check_dupes", action="store_true",
+        help="flag near-duplicate concepts (semantic; needs the 'semantic' extra)",
+    )
+    p_imp.add_argument(
+        "--dupe-threshold", dest="dupe_threshold", type=float, default=0.9,
+        help="cosine threshold for --check-dupes (default 0.9)",
+    )
     p_imp.set_defaults(func=cmd_import)
 
     p_val = sub.add_parser("validate", help="run schema + dangling-reference gates")

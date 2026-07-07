@@ -46,8 +46,10 @@ canonia index stats
 canonia index dupes --threshold 0.9      # near-duplicate concept pairs
 ```
 
-`dupes` is the maintenance companion to the importer's exact-match dedup: it
-surfaces concepts that are *semantically* close (candidates to `merge`).
+`dupes` runs over an already-built index — the maintenance companion to
+[`canonia import --check-dupes`](importing.md#catching-duplicates-before-you-commit),
+which flags near-duplicates at import time before anything is written. Both surface
+concepts that are *semantically* close (candidates to `merge`).
 
 ## Hybrid search in the MCP server
 

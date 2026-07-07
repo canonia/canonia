@@ -72,6 +72,27 @@ distinguishing `#anchor` to the mapping and re-running (free), or by authoring t
 body directly. Markdown links inside extracted bodies are rewritten `[text](path)`
 → `[[id]]` when they point at another concept.
 
+### Catching duplicates before you commit
+
+With the [semantic extra](indexing.md) installed, add `--check-dupes` to any import
+to have the dry-run flag **near-duplicate concepts** — before anything is written:
+
+```bash
+canonia import --mapping migration/mapping.yml --check-dupes
+canonia import --zero-config ./docs --domain process --check-dupes --dupe-threshold 0.85
+```
+
+It reports two kinds of overlap (default cosine ≥ 0.9, tune with `--dupe-threshold`):
+
+- **within this import** — two incoming concepts that say nearly the same thing
+  (candidates to merge or `dedup` in your `mapping.yml`);
+- **vs. existing canon** — an incoming concept that overlaps one already in the
+  canon (maybe already covered — review before committing). A concept whose `id`
+  matches an existing one is an *update*, not a duplicate, and is never flagged.
+
+It is advisory: it never fails the import, and it is skipped (with a note) if the
+extra isn't installed.
+
 After importing, always run the gates:
 
 ```bash

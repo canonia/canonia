@@ -538,9 +538,76 @@ def open_index(config, *, create: bool = False) -> Optional[EmbeddingIndex]:
 def build_index(config, concepts, *, log: Optional[Logger] = None) -> BuildStats:
     """Build/update the canon's embedding index. Requires the semantic extra."""
     _require_deps()
-    model = EmbeddingModel.load(_model_dir_for(config), log=log)
+    model = load_model(config, log=log)
     with EmbeddingIndex(index_path_for(config), model_name=getattr(config, "index_model", DEFAULT_MODEL)) as idx:
         return idx.build(concepts, model, log=log)
+
+
+def load_model(config, *, log: Optional[Logger] = None, allow_download: bool = True) -> EmbeddingModel:
+    """Load the canon's embedding model (fetching it once if needed)."""
+    return EmbeddingModel.load(_model_dir_for(config), log=log, allow_download=allow_download)
+
+
+@dataclass
+class DupePair:
+    """Two near-duplicate concepts and their cosine similarity.
+
+    ``kind`` is ``"within-import"`` (both are being imported) or ``"vs-canon"``
+    (``a_id`` is being imported, ``b_id`` already exists in the canon).
+    """
+
+    a_id: str
+    b_id: str
+    score: float
+    kind: str
+
+
+def near_duplicates(
+    new_concepts: Sequence,
+    model: EmbeddingModel,
+    *,
+    existing: Optional[Sequence] = None,
+    threshold: float = 0.9,
+) -> List[DupePair]:
+    """Flag near-duplicate concept pairs at/above ``threshold`` (cosine).
+
+    Compares the ``new_concepts`` against each other and, if ``existing`` is
+    given, each new concept against the already-in-canon concepts. A new concept
+    whose id matches an existing one is an *update*, not a duplicate, so that
+    pairing is skipped. Pure/dry-run: computes embeddings in memory, writes
+    nothing.
+    """
+    _require_deps()
+    new_ids = [c.id for c in new_concepts]
+    if not new_ids:
+        return []
+    new_vecs = model.embed([concept_text(c) for c in new_concepts])
+    pairs: List[DupePair] = []
+
+    n = len(new_ids)
+    if n >= 2:
+        sims = _np.dot(new_vecs, new_vecs.T)
+        for i in range(n):
+            for j in range(i + 1, n):
+                s = float(sims[i, j])
+                if s >= threshold:
+                    pairs.append(DupePair(new_ids[i], new_ids[j], s, "within-import"))
+
+    if existing:
+        new_id_set = set(new_ids)
+        ex = [c for c in existing if c.id not in new_id_set]  # same id ⇒ update
+        if ex:
+            ex_ids = [c.id for c in ex]
+            ex_vecs = model.embed([concept_text(c) for c in ex])
+            cross = _np.dot(new_vecs, ex_vecs.T)
+            for i in range(n):
+                for k in range(len(ex_ids)):
+                    s = float(cross[i, k])
+                    if s >= threshold:
+                        pairs.append(DupePair(new_ids[i], ex_ids[k], s, "vs-canon"))
+
+    pairs.sort(key=lambda p: -p.score)
+    return pairs
 
 
 def _model_dir_for(config) -> Path:

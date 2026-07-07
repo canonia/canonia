@@ -126,6 +126,31 @@ def test_duplicate_pairs(tmp_path):
     assert len(pairs) == 1 and set(pairs[0][:2]) == {"a", "b"}
 
 
+def test_near_duplicates_within_and_vs_canon():
+    model = FakeModel()
+    new = [
+        _concept("alpha-one", "shared shared shared body"),
+        _concept("alpha-two", "shared shared shared body"),   # ~dup of alpha-one
+        _concept("lonely", "totally distinct unrelated tokens"),
+    ]
+    existing = [
+        _concept("alpha-canon", "shared shared shared body"),  # ~dup of the alphas
+        _concept("alpha-one", "shared shared shared body"),    # same id ⇒ update, skip
+    ]
+    pairs = index.near_duplicates(new, model, existing=existing, threshold=0.85)
+    within = {frozenset((p.a_id, p.b_id)) for p in pairs if p.kind == "within-import"}
+    vs = [(p.a_id, p.b_id) for p in pairs if p.kind == "vs-canon"]
+    assert frozenset(("alpha-one", "alpha-two")) in within
+    assert ("alpha-one", "alpha-canon") in vs and ("alpha-two", "alpha-canon") in vs
+    # the same-id update pairing is never reported as a duplicate
+    assert all("alpha-one" not in (p.a_id, p.b_id) or p.kind == "within-import"
+               for p in pairs if p.b_id == "alpha-one")
+
+
+def test_near_duplicates_empty_input():
+    assert index.near_duplicates([], FakeModel()) == []
+
+
 def test_concept_text_includes_fields():
     c = _concept("x", "the summary", body="the body")
     c.tags = ["tagged"]

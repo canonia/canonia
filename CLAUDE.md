@@ -14,7 +14,7 @@ versioning + authorship.
 **Status: pre-alpha, v0.1 feature-complete.** Identity reserved (GitHub org
 `canonia`, npm + PyPI `canonia`, Apache-2.0). **schema + graph gates + importer +
 MCP server + static site + semantic index + docs guide are functional** (`canonia
-import` / `validate` / `index` / `serve` / `build`, curated + zero-config, 48 tests
+import` / `validate` / `index` / `serve` / `build`, curated + zero-config, 50 tests
 passing); access.py a no-op seam. MCP tools: search / get / create / update /
 list_domains + lifecycle (deprecate / merge / archive / restore / remove). MCP
 transport and the site are dependency-free stdlib impls (no `mcp` SDK — needs Python
@@ -24,7 +24,9 @@ transport and the site are dependency-free stdlib impls (no `mcp` SDK — needs 
 WordPiece tokenizer, float32 vectors in a stdlib `sqlite3` store with brute-force
 NumPy cosine — fully offline (a private canon never leaves the box; model is fetched
 once). `search` goes hybrid keyword+semantic once an index exists; degrades to
-keyword-only without the extra/index. **Deviation from the sqlite-vec plan:** macOS
+keyword-only without the extra/index. `canonia import --check-dupes` runs the same
+near-duplicate detection over an import dry-run (within-import + vs-existing-canon,
+advisory) before anything is written. **Deviation from the sqlite-vec plan:** macOS
 system Python's `sqlite3` lacks loadable-extension support, so sqlite-vec can't load
 — `index.backend: sqlite` (brute force) is the working default; `sqlite-vec` is a
 reserved seam for large canons on an extension-capable Python. Docs in `docs/` (see
