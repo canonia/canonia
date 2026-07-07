@@ -13,7 +13,7 @@ when they point at another concept.
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 from canonia import markdown
 from canonia.config import SourceRepo
@@ -115,6 +115,8 @@ def _build_body(spec: ConceptSpec, resolver: SourceResolver, warnings: List[str]
 
 def _rewrite(body: str, spec: ConceptSpec, resolver: SourceResolver) -> str:
     primary = spec.primary
+    if primary is None:                       # no source to resolve links against
+        return body.strip("\n")
     rewritten = markdown.rewrite_links(
         body, lambda target: resolver.resolve_link(primary, target)
     )

@@ -9,7 +9,6 @@ from canonia.markdown_html import render_markdown
 from canonia.server import CanonService
 from canonia.site import build_site
 
-
 # --- renderer ---------------------------------------------------------------
 
 def test_render_basic_blocks_and_inline():
@@ -55,7 +54,7 @@ def _canon(tmp_path: Path) -> CanonService:
 
 
 def test_build_site_produces_pages_and_index(tmp_path: Path):
-    svc = _canon(tmp_path)
+    _canon(tmp_path)                                  # scaffold the canon on disk
     out = tmp_path / "site"
     result = build_site(tmp_path, out_dir=out)
 

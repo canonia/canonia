@@ -22,11 +22,14 @@ import json
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional
 
 from canonia import __version__, access
 from canonia.config import CanoniaConfig
 from canonia.graph import Graph
+
+if TYPE_CHECKING:  # imported lazily at runtime (the semantic extra may be absent)
+    from canonia.index import SemanticSearcher
 from canonia.schema import Concept, validate_concept
 
 PROTOCOL_VERSION = "2025-06-18"
@@ -60,7 +63,7 @@ class CanonService:
         self.autocommit = self.config.autocommit if autocommit is None else autocommit
         # Semantic searcher is built lazily on the first search that needs it, so
         # the server starts (and stays keyword-only canons stay) dependency-free.
-        self._searcher = None
+        self._searcher: Optional["SemanticSearcher"] = None
         self._searcher_ready = False
 
     # --- helpers ------------------------------------------------------------
@@ -744,6 +747,9 @@ class StdioServer:
         # Notifications (no id) get no response.
         if msg_id is None:
             return
+        if not isinstance(method, str):
+            self._send_error(msg_id, INVALID_REQUEST, "missing or invalid method")
+            return
 
         try:
             result = self._dispatch(method, params)
@@ -777,7 +783,7 @@ class StdioServer:
     def _call_tool(self, params: dict) -> dict:
         name = params.get("name")
         args = params.get("arguments") or {}
-        if name not in _TOOL_NAMES:
+        if not isinstance(name, str) or name not in _TOOL_NAMES:
             raise _RpcError(METHOD_NOT_FOUND, f"unknown tool: {name}")
         handler = getattr(self.service, name)
         try:

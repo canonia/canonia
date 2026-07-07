@@ -83,8 +83,8 @@ class SourceResolver:
         Returns the concept id when the link points at exactly one concept's
         source, else ``None`` (the link points outside the canon).
         """
-        path_part, _, anchor = target.partition("#")
-        anchor = anchor.strip() or None
+        path_part, _, raw_anchor = target.partition("#")
+        anchor = raw_anchor.strip() or None
         # Resolve relative to the directory of the source file, within the repo.
         base_dir = posixpath.dirname(from_ref.path)
         resolved = posixpath.normpath(posixpath.join(base_dir, path_part)) if path_part else from_ref.path

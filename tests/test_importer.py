@@ -10,7 +10,13 @@ from canonia.config import SourceRepo
 from canonia.graph import Graph
 from canonia.importer import import_curated, import_zeroconfig
 from canonia.importer.plan import (
-    MOVED, ORPHAN, SECTION, STUB, WHOLE_FILE, EmittedConcept, ImportPlan,
+    MOVED,
+    ORPHAN,
+    SECTION,
+    STUB,
+    WHOLE_FILE,
+    EmittedConcept,
+    ImportPlan,
 )
 from canonia.schema import Concept
 
@@ -176,7 +182,7 @@ def test_apply_prune_moved_deletes_stale_path_keeps_new(tmp_path: Path):
     plan.write(out)                                     # writes ops/thing.md
     plan.apply_prune(pruned)                            # removes process/thing.md
 
-    files = {str(p.relative_to(out)) for p in out.rglob("*.md")}
+    files = {p.relative_to(out).as_posix() for p in out.rglob("*.md")}
     assert files == {"ops/thing.md"}
 
 

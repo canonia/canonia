@@ -35,9 +35,10 @@ import os
 import sqlite3
 import unicodedata
 import urllib.request
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 # --- optional heavy deps (the canonia[semantic] extra) ----------------------
 # NumPy is cheap to import and used throughout, so bind it eagerly. ONNX Runtime
@@ -46,7 +47,7 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 try:  # pragma: no cover - import guard
     import numpy as _np
 except ImportError:  # pragma: no cover
-    _np = None
+    _np = None  # type: ignore[assignment]
 
 _ort = None
 
@@ -221,7 +222,7 @@ class WordPieceTokenizer:
         self.pad = vocab.get("[PAD]", 0)
 
     @classmethod
-    def from_file(cls, path: Path) -> "WordPieceTokenizer":
+    def from_file(cls, path: Path) -> WordPieceTokenizer:
         vocab: Dict[str, int] = {}
         with open(path, encoding="utf-8") as fh:
             for i, line in enumerate(fh):
@@ -358,7 +359,7 @@ class EmbeddingModel:
     @classmethod
     def load(
         cls, model_dir: Path, *, log: Optional[Logger] = None, allow_download: bool = True
-    ) -> "EmbeddingModel":
+    ) -> EmbeddingModel:
         paths = ensure_model(Path(model_dir), log=log, allow_download=allow_download)
         return cls(paths["model"], paths["vocab"])
 
@@ -466,7 +467,7 @@ class EmbeddingIndex:
     def close(self) -> None:
         self.conn.close()
 
-    def __enter__(self) -> "EmbeddingIndex":
+    def __enter__(self) -> EmbeddingIndex:
         return self
 
     def __exit__(self, *exc) -> None:
@@ -526,7 +527,7 @@ class EmbeddingIndex:
     def __len__(self) -> int:
         return self.conn.execute("SELECT COUNT(*) FROM embeddings").fetchone()[0]
 
-    def _matrix(self, domain: Optional[str] = None) -> Tuple[List[str], object]:
+    def _matrix(self, domain: Optional[str] = None) -> Tuple[List[str], Any]:
         sql = "SELECT id, vector FROM embeddings"
         args: tuple = ()
         if domain:

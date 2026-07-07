@@ -90,14 +90,14 @@ class Concept:
     # --- construction -------------------------------------------------------
 
     @classmethod
-    def from_markdown(cls, text: str, path: Optional[Path] = None) -> "Concept":
+    def from_markdown(cls, text: str, path: Optional[Path] = None) -> Concept:
         meta, body = markdown.split_frontmatter(text)
         return cls.from_frontmatter(meta, body, path=path)
 
     @classmethod
     def from_frontmatter(
         cls, meta: dict, body: str = "", path: Optional[Path] = None
-    ) -> "Concept":
+    ) -> Concept:
         meta = dict(meta or {})
         extra = {k: v for k, v in meta.items() if k not in KNOWN_KEYS}
         return cls(
@@ -117,7 +117,7 @@ class Concept:
         )
 
     @classmethod
-    def load(cls, path: Path) -> "Concept":
+    def load(cls, path: Path) -> Concept:
         return cls.from_markdown(Path(path).read_text(encoding="utf-8"), path=Path(path))
 
     # --- serialization ------------------------------------------------------

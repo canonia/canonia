@@ -8,7 +8,6 @@ from canonia import markdown
 from canonia.graph import Graph
 from canonia.schema import Concept, validate_concept
 
-
 # --- markdown ---------------------------------------------------------------
 
 def test_split_frontmatter_roundtrip():

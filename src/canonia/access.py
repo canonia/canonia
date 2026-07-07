@@ -14,8 +14,9 @@ just humans. ``Identity.kind`` carries that distinction from the start.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable, List, Optional, TypeVar
+from typing import List, Optional, TypeVar
 
 T = TypeVar("T")
 

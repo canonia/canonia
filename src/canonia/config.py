@@ -83,7 +83,7 @@ class CanoniaConfig:
         return None
 
     @classmethod
-    def load(cls, path_or_dir: Path) -> "CanoniaConfig":
+    def load(cls, path_or_dir: Path) -> CanoniaConfig:
         path = Path(path_or_dir)
         if path.is_dir():
             found = cls.find(path)

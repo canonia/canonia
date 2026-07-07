@@ -19,7 +19,10 @@ dependencies = ["PyYAML>=6.0"]
 # cosine over a stdlib-sqlite vector store); everything degrades to keyword
 # search without it. Needs no `sqlite-vec` — that backend is a future seam.
 semantic = ["numpy>=1.21", "onnxruntime>=1.15"]
-dev = ["pytest>=7", "numpy>=1.21", "onnxruntime>=1.15"]
+dev = [
+    "pytest>=7", "numpy>=1.21", "onnxruntime>=1.15",
+    "ruff>=0.6", "mypy>=1.8", "types-PyYAML",
+]
 
 [project.scripts]
 canonia = "canonia.cli:main"
@@ -31,3 +34,25 @@ Issues = "https://github.com/canonia/canonia/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.ruff]
+target-version = "py39"          # keep suggestions within the 3.9 floor
+line-length = 100
+
+[tool.ruff.lint]
+# E/F = pycodestyle+pyflakes, I = import sort, W = warnings, B = bugbear.
+# E501 (line length) is left to human judgment — the codebase uses deliberate
+# alignment we don't want a linter reflowing. UP (pyupgrade) is deliberately
+# omitted: it would rewrite List->list / Optional->| en masse, which is risky
+# against the 3.9 floor — a separate migration if/when the floor rises.
+select = ["E", "F", "I", "W", "B"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.9"
+files = ["src/canonia"]
+# Pragmatic gate: catch real type errors without demanding exhaustive
+# annotations. Untyped function bodies are skipped by default (no strict mode).
+warn_redundant_casts = true
+warn_unused_ignores = true
+no_implicit_optional = true

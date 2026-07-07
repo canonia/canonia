@@ -13,7 +13,6 @@ import pytest
 
 from canonia import index
 
-
 # --- capability probes ------------------------------------------------------
 
 def test_loadable_extensions_probe_returns_bool():

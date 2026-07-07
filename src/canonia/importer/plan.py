@@ -93,7 +93,7 @@ class ImportPlan:
 
     # --- reconciliation (--prune) ------------------------------------------
 
-    def reconcile(self, out_dir: Path) -> List["Pruned"]:
+    def reconcile(self, out_dir: Path) -> List[Pruned]:
         """Concept files under ``out_dir`` this import would NOT (re)produce.
 
         Reconcile by id: an existing concept whose id is absent from the emitted
@@ -120,7 +120,7 @@ class ImportPlan:
                 pruned.append(Pruned(cid, path, MOVED))
         return sorted(pruned, key=lambda p: str(p.path))
 
-    def apply_prune(self, pruned: List["Pruned"]) -> List[Path]:
+    def apply_prune(self, pruned: List[Pruned]) -> List[Path]:
         """Delete the reconciled files. Caller gates this behind --commit."""
         removed: List[Path] = []
         for item in pruned:
@@ -132,7 +132,7 @@ class ImportPlan:
     # --- reporting ----------------------------------------------------------
 
     def render_report(
-        self, *, committed: bool = False, pruned: Optional[List["Pruned"]] = None
+        self, *, committed: bool = False, pruned: Optional[List[Pruned]] = None
     ) -> str:
         lines: List[str] = []
         verb = "Imported" if committed else "Would import"
@@ -175,10 +175,14 @@ class ImportPlan:
         return "\n".join(lines)
 
     def _display_path(self, path: Path) -> str:
-        """Path relative to the output dir when possible, else absolute."""
+        """Path relative to the output dir when possible, else absolute.
+
+        Rendered with forward slashes on every OS so the report reads the same
+        way concept ``rel_path``s are written (``domain/id.md``).
+        """
         if self.out_dir is not None:
             try:
-                return str(Path(path).resolve().relative_to(Path(self.out_dir).resolve()))
+                return Path(path).resolve().relative_to(Path(self.out_dir).resolve()).as_posix()
             except ValueError:
                 pass
-        return str(path)
+        return Path(path).as_posix()

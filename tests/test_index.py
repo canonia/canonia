@@ -193,7 +193,7 @@ def test_server_search_goes_hybrid_with_index(tmp_path, monkeypatch):
 def test_server_search_keyword_only_without_index(tmp_path):
     from canonia.server import CanonService
 
-    config = _canon(tmp_path)
+    _canon(tmp_path)                                  # scaffold the canon on disk
     c = _concept("alpha-widget", "alpha widgets")
     (tmp_path / "concepts" / "process" / "alpha-widget.md").write_text(c.to_markdown(), encoding="utf-8")
     result = CanonService(tmp_path).search("alpha", limit=5)

@@ -10,7 +10,7 @@ decide, because the importer must never crash on a messy source file.
 from __future__ import annotations
 
 import re
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 import yaml
 
@@ -175,7 +175,7 @@ def rewrite_links(body: str, resolve) -> str:
     text. Image links (``![...]``) and autolinks are left untouched.
     """
 
-    def _sub(match: "re.Match[str]") -> str:
+    def _sub(match: re.Match[str]) -> str:
         text, target = match.group(1), match.group(2).strip()
         if target.startswith(("http://", "https://", "mailto:", "#")):
             return match.group(0)

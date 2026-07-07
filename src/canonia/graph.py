@@ -14,9 +14,10 @@ on everywhere:
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, List, Optional
 
 from canonia.schema import (
     DEFAULT_DOMAINS,
@@ -39,7 +40,7 @@ class Graph:
     # --- loading ------------------------------------------------------------
 
     @classmethod
-    def load(cls, concepts_root: Path) -> "Graph":
+    def load(cls, concepts_root: Path) -> Graph:
         concepts_root = Path(concepts_root)
         graph = cls()
         for path in sorted(concepts_root.rglob("*.md")):

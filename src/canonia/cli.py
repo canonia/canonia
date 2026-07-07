@@ -21,7 +21,6 @@ from canonia.importer import import_curated, import_zeroconfig
 from canonia.importer.plan import ImportPlan
 from canonia.schema import DEFAULT_DOMAINS, Issue
 
-
 # --- helpers ----------------------------------------------------------------
 
 def _load_config(canon: Optional[str]) -> Optional[CanoniaConfig]:
@@ -127,16 +126,14 @@ def cmd_import(args) -> int:
 
     # Always show what would happen, then gate-check the emitted graph in memory.
     graph = _graph_from_plan(plan)
-    kwargs = {"domains": domains}
     if id_pattern:
-        kwargs["id_pattern"] = id_pattern
-    issues = graph.validate(**kwargs)
+        issues = graph.validate(domains=domains, id_pattern=id_pattern)
+    else:
+        issues = graph.validate(domains=domains)
 
-    committed = False
     if args.commit:
         written = plan.write(out_dir)
         removed = plan.apply_prune(pruned) if pruned else []
-        committed = True
         print(plan.render_report(committed=True, pruned=pruned))
         print(f"\nWrote {len(written)} files under {out_dir}")
         if removed:
@@ -216,10 +213,10 @@ def cmd_validate(args) -> int:
         return 1
 
     graph = Graph.load(concepts_dir)
-    kwargs = {"domains": config.domains if config else list(DEFAULT_DOMAINS)}
     if config:
-        kwargs["id_pattern"] = config.id_pattern
-    issues = graph.validate(**kwargs)
+        issues = graph.validate(domains=config.domains, id_pattern=config.id_pattern)
+    else:
+        issues = graph.validate(domains=list(DEFAULT_DOMAINS))
     if issues:
         print(f"{len(issues)} issue(s) in {len(graph)} concepts:", file=sys.stderr)
         _print_issues(issues)

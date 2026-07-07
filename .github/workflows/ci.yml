@@ -1,9 +1,13 @@
 # Copyright 2026 André Lopes
 # SPDX-License-Identifier: Apache-2.0
 #
-# CI for the Canonia framework: run the test suite across every supported
-# Python. The `dev` extra pulls numpy + onnxruntime, so the semantic-index
-# tests run fully — no ONNX model is downloaded (tests inject a FakeModel).
+# CI for the Canonia framework:
+#  - lint:  ruff + mypy once (fast, single Python).
+#  - test:  the suite across every supported Python on Linux, plus a macOS and
+#           Windows job on one Python to catch OS-specific breakage — notably the
+#           sqlite loadable-extension probe (macOS system Python lacks support).
+# The `dev` extra pulls numpy + onnxruntime, so the semantic-index tests run
+# fully — no ONNX model is downloaded (tests inject a FakeModel).
 name: CI
 
 on:
@@ -18,13 +22,46 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
-    name: pytest (py${{ matrix.python-version }})
+  lint:
+    name: lint (ruff + mypy)
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install (with dev extra)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev]'
+
+      - name: Ruff
+        run: ruff check src tests
+
+      - name: Mypy
+        run: mypy
+
+  test:
+    name: pytest (${{ matrix.os }} py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash        # consistent quoting for '.[dev]' across Windows/macOS/Linux
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest]
         python-version: ["3.9", "3.10", "3.11", "3.12"]
+        include:
+          - os: macos-latest
+            python-version: "3.12"
+          - os: windows-latest
+            python-version: "3.12"
     steps:
       - uses: actions/checkout@v4
 

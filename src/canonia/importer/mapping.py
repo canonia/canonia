@@ -31,7 +31,7 @@ class SourceRef:
     anchor: Optional[str] = None
 
     @classmethod
-    def parse(cls, raw, default_repo: str) -> "SourceRef":
+    def parse(cls, raw, default_repo: str) -> SourceRef:
         if isinstance(raw, dict):
             repo = raw.get("repo", default_repo)
             path = raw.get("path", "")
