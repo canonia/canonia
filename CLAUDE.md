@@ -12,7 +12,16 @@ interface; a static site gives humans a browsable graph + backlinks; git provide
 versioning + authorship.
 
 **Status: pre-alpha.** Identity reserved (GitHub org `canonia`, npm + PyPI
-`canonia`, Apache-2.0). Building the importer first — not yet functional.
+`canonia`, Apache-2.0). **schema + graph gates + importer + MCP server + static
+site + docs guide are functional** (`canonia import` / `validate` / `serve` /
+`build`, curated + zero-config, 39 tests passing); the embedding index is the
+remaining stub, access.py a no-op seam. MCP tools: search / get / create / update /
+list_domains + lifecycle (deprecate / merge / archive / restore / remove). MCP
+transport and the site are dependency-free stdlib impls (no `mcp` SDK — needs Python
+≥3.10, env is 3.9; site is self-contained HTML, not MkDocs). Docs in `docs/`.
+**Security:** the site has NO built-in auth (governance is future) — serve it
+privately (tailnet/loopback) or behind an auth edge; see docs/deploying.md.
+Remaining v0.1: embedding index (sqlite-vec) for semantic search/dedup.
 
 ## Key decisions
 
@@ -29,24 +38,30 @@ versioning + authorship.
 
 ## Concept schema
 
-One concept per file: frontmatter `id, title, domain, source[], summary,
+One concept per file: frontmatter `id, title, domain, status, source[], summary,
 references[]` + markdown body. `id` = globally-unique kebab-case. `references[]` is
 the authoritative graph; a **dangling-reference gate** must pass (every referenced
-id resolves).
+id resolves). `status` ∈ active·draft·deprecated·merged·archived; retirement is
+non-breaking (Wikipedia-style): `merged` concepts carry a `redirect` the gate
+follows, `deprecated` carry an optional `superseded_by`. Hard delete is gated on
+zero dependents.
 
 ## v0.1 scope + module layout
 
 ```
 canonia/
-  cli.py        # canonia init | import | serve | build
-  schema.py     # concept model + validation
-  graph.py      # load concepts, backlinks, dangling-reference gate
-  importer/     # canonia import — zero-config heuristics + optional mapping.yml
-  server.py     # MCP server: search / get / create / update
-  index.py      # embedding index (sqlite-vec)
-  site.py       # static site (MkDocs Material)
-  access.py     # SEAM: no-op access filter (governance module later)
-docs/           # install / configure / maintain / use guide (dogfooded)
+  cli.py            # canonia init | import | validate | serve | build
+  config.py         # canonia.yml loader (domains, id pattern, sources, git, canon name)
+  schema.py         # concept model + validation (incl. lifecycle fields)
+  graph.py          # load concepts, backlinks, redirect resolution, dangling-ref gate
+  markdown.py       # frontmatter + slug/section/link helpers (importer + schema)
+  markdown_html.py  # dependency-free markdown -> HTML (static site)
+  importer/         # canonia import — curated (mapping.yml) + zero-config
+  server.py         # MCP server (stdlib stdio): search/get/create/update + lifecycle
+  index.py          # embedding index (sqlite-vec) — STUB
+  site.py           # static site — self-contained HTML (not MkDocs; generator seam kept)
+  access.py         # SEAM: no-op access filter (governance module later)
+docs/               # install / configure / maintain / use guide (dogfooded)
 ```
 
 Build order: **schema → importer** (seed + validate on real data) → server → site → docs.
