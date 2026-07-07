@@ -3,31 +3,30 @@
 > A git-backed, MCP-served **knowledge graph for AI coding agents** — one canonical
 > source of truth that many repositories reference instead of copying.
 
-**Status: pre-alpha.** The concept **schema**, the graph **gates**
-(dangling-reference + schema), the **importer** (`canonia import`), the **MCP
-server** (`canonia serve`), and the **static site** (`canonia build`) work today;
-the embedding index is the remaining stub. Build order: schema → importer →
-server → site → docs.
+**Status: pre-alpha (v0.1 feature-complete).** Working today: the concept
+**schema**, the graph **gates** (schema + dangling-reference), the **importer**
+(`canonia import`), the **MCP server** (`canonia serve`), the optional local
+**semantic index** (`canonia index`), and the **static site** (`canonia build`).
+Governance/access control is a deliberate future module — until then, serve a
+canon **privately** (see [docs/deploying.md](docs/deploying.md)).
 
 ## The idea
 
 Knowledge that AI agents (and humans) rely on tends to get **copied** into every
-repository's `CLAUDE.md`/`AGENTS.md`/docs — and then drifts out of sync. Canonia
-inverts that:
+repository's `CLAUDE.md` / `AGENTS.md` / docs — and then drifts out of sync.
+Canonia inverts that:
 
 - **One canon** — a git repository of small, single-concept Markdown files
-  (the source of truth). Persisted on GitHub, versioned, mergeable.
+  (the source of truth). Versioned, mergeable, authored by humans *and* agents.
 - **Reference, not copy** — each consuming repo holds a concept *id*, not a
   duplicated copy.
-- **Fetch on demand over MCP** — agents query the Canonia MCP server for a
-  concept when they need it, and write updates back so every other session and
-  repo inherits them.
+- **Fetch on demand over MCP** — agents query the Canonia MCP server for a concept
+  when they need it, and write updates back so every other session and repo
+  inherits them.
 - **A graph, not a tree** — concepts link to concepts; backlinks and a browsable
   web view come for free.
-- **Versioning & authorship from git** — every change is a commit, so history
-  and "who (human or agent) changed what" are built in.
-
-## How it will fit together
+- **Versioning & authorship from git** — every change is a commit, so history and
+  "who (human or agent) changed what" are built in.
 
 ```
  producers            serving layer                consumers
@@ -38,92 +37,81 @@ inverts that:
                     your canon (git repo = source of truth) ─▶ GitHub
 ```
 
-## The importer (working today)
+## Quickstart
 
-`canonia import` seeds a canon from existing repos — **dry-run by default**,
-review-then-commit, never silently mangling your docs. Two modes:
+The end-to-end path: install → create a canon → seed it from docs you already
+have → make it searchable → point your agent at it → browse it. Each step links to
+its full guide.
 
 ```bash
-# curated: consume a reviewed mapping.yml (split / merge / dedup decisions)
-canonia import --mapping migration/mapping.yml          # dry-run: shows the plan + gate result
-canonia import --mapping migration/mapping.yml --commit # write the concept files
+# 1. Install (the [semantic] extra adds local embedding search; omit for a lean install)
+pip install 'canonia[semantic]'
 
-# zero-config: a folder of markdown -> one concept per file (id from the slug,
-# references auto-extracted from existing links)
-canonia import --zero-config ./docs --domain process --commit
+# 2. Create a canon (a git repo of concepts) and version it
+canonia init my-canon --domains process,infra,ops
+cd my-canon && git init
 
-# gates, any time
-canonia validate
+# 3. Seed it from markdown you already have — dry-run first, then --commit
+canonia import --zero-config ../my-existing-notes --domain process        # preview
+canonia import --zero-config ../my-existing-notes --domain process --commit
+canonia validate            # schema + dangling-reference gates must pass
+
+# 4. Build the semantic index (enables hybrid keyword+semantic search)
+canonia index build
+
+# 5. Point your LLM/agent at the canon over MCP (see the guide for your client)
+canonia serve --canon .     # stdio MCP server: search / get / create / update / …
+
+# 6. Browse the graph as a static site (open offline, or serve privately)
+canonia build && open site/index.html
 ```
 
-The importer is a pure function of `(sources + mapping)`, so it is idempotent and
-free to re-run as the schema evolves. Bodies it can't safely extract (a source
-shared by several concepts, or an anchor with no matching heading) are emitted as
-**flagged stubs** carrying the summary + provenance — never a wrong or duplicated
-body — for the human to resolve.
+- **[installing](docs/installing.md)** — requirements, install options, `canonia init`.
+- **[importing](docs/importing.md)** — zero-config vs curated `mapping.yml`, dry-run,
+  duplicate detection, and `--prune` reconciliation.
+- **[using with agents](docs/using-with-agents.md)** — connect *and instruct* your
+  LLM (Claude Code, Claude Desktop, Cursor, and other MCP clients) to actually use
+  the canon.
+- **[indexing](docs/indexing.md)** — the offline semantic index and hybrid search.
+- **[deploying](docs/deploying.md)** — serve the canon **privately** (no built-in
+  auth yet).
 
-## The MCP server (working today)
+## What each command does
 
-`canonia serve` runs a stateless [Model Context Protocol](https://modelcontextprotocol.io)
-server on stdio, exposing five tools to agents — `search`, `get`, `create`,
-`update`, `list_domains`. Reads and writes go straight to the git-backed concept
-files (optimistic concurrency, no locking), so every session and repo inherits
-changes on the next read. Point an MCP client at it:
-
-```jsonc
-// e.g. an MCP client config
-{
-  "mcpServers": {
-    "canonia": { "command": "canonia", "args": ["serve", "--canon", "/path/to/canon"] }
-  }
-}
-```
-
-Every read runs through a governance seam (`access.py`) that is a deliberate
-no-op in v1 — the canon ships open, with the hook in place for a future RBAC
-module that scopes humans *and* LLM identities. The transport is a dependency-free
-implementation of the MCP stdio protocol, so it runs anywhere Python does.
-
-Writes are **permissive**: creating a concept that references one that doesn't
-exist yet succeeds with a *warning* (authoring order is arbitrary and graphs have
-cycles) — `canonia validate` is the hard dangling-reference gate for CI. With
-`git.autocommit` (in `canonia.yml`, or `serve --autocommit`) each write is
-committed locally — it **never pushes**. Concepts authored in the canon get their
-provenance repo from `canon.name` (default `canon`).
-
-### Concept lifecycle — retire without breaking links
-
-In a *reference* graph, deleting a concept manufactures the exact dangling links
-the gate forbids (a "red link"). So the tools favour **non-breaking** retirement,
-Wikipedia-style, and gate the destructive one:
-
-| Tool | Effect | Inbound refs |
+| Command | Purpose | Guide |
 |---|---|---|
-| `deprecate` | `status: deprecated` + optional `superseded_by`; content stays | still resolve |
-| `merge` | concept becomes a **redirect** tombstone forwarding to a canonical id (which absorbs its provenance); `get` follows it transparently and backlinks carry through. `repoint=true` also rewrites referrers | still resolve |
-| `archive` | drops out of search/active counts, stays on disk | still resolve |
-| `remove` | **hard delete — refused unless zero dependents.** `force=true` deletes anyway and reports what breaks | ⚠️ breaks them |
+| `canonia init` | scaffold a canon (`canonia.yml`, `concepts/`, `.gitignore`) | [installing](docs/installing.md) |
+| `canonia import` | seed a canon from existing repos (curated or zero-config; `--prune` to reconcile) | [importing](docs/importing.md) |
+| `canonia validate` | run the schema + dangling-reference gates | [maintaining](docs/maintaining.md) |
+| `canonia index` | build the local semantic index; search / find duplicates | [indexing](docs/indexing.md) |
+| `canonia serve` | run the MCP server agents read/write concepts through | [using with agents](docs/using-with-agents.md) |
+| `canonia build` | generate the static site (browsable graph + backlinks) | [deploying](docs/deploying.md) |
 
-The dangling-reference gate follows redirects, so a merged id keeps resolving; it
-flags broken or cyclic redirects and dangling `superseded_by` pointers.
+Configuration for all of them lives in one file, `canonia.yml`
+([configuring](docs/configuring.md)). Concepts retire **without breaking links**
+(Wikipedia-style deprecate / merge / archive) — see [lifecycle](docs/lifecycle.md).
 
-## The static site (working today)
+## Design notes
 
-`canonia build` generates a **self-contained** static site — one HTML page per
-concept (rendered body, outgoing references, backlinks, provenance, and
-redirect/deprecation banners), a domain index, and client-side search:
+- **Reference, not copy** — two link layers: `references:` frontmatter (the
+  authoritative graph the gate enforces) + `[[id]]` inline links in prose.
+- **No locking** — git merge / optimistic concurrency instead, so async agent
+  sessions never block each other.
+- **Permissive writes, strict gate** — agents can create a concept that references
+  one that doesn't exist yet (a warning); `canonia validate` is the hard gate for CI.
+- **Fully offline & private** — the semantic index runs a local ONNX model; a
+  private canon never leaves your machine. The site makes **zero external requests**.
+- **Governance is a future module** — a no-op access seam (`access.py`) is wired
+  now and will scope humans *and* LLM identities later.
+
+## Contributing / from source
 
 ```bash
-canonia build                       # -> <canon>/site/
-canonia build --out ./public        # custom output dir
-open <canon>/site/index.html        # no server needed — works from file://
+git clone https://github.com/canonia/canonia && cd canonia
+pip install -e ".[dev]"     # editable install + test/lint deps
+pytest -q                   # test suite
+ruff check src tests && mypy # lint + type gate (also enforced in CI)
 ```
-
-It has **zero external requests** (inline CSS/JS, no CDN), is theme-aware
-(light/dark), and follows redirects when linking — so it opens offline or sits
-behind an auth-capable edge (e.g. Cloudflare Access) for the future governance
-module to gate. It's a dependency-free backend; `site.generator` in `canonia.yml`
-is a seam for adding a `mkdocs-material` backend later.
 
 ## License
 

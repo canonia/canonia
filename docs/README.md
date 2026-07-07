@@ -24,6 +24,8 @@ provides versioning + authorship.
 
 Configuration for all of them lives in one file: [configuring.md](configuring.md).
 Retiring concepts without breaking links: [lifecycle](lifecycle.md).
+Connecting **and instructing** your LLM to use the canon:
+[using-with-agents](using-with-agents.md).
 Publishing the framework to PyPI: [releasing](releasing.md).
 
 ## Quickstart

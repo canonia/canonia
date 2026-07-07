@@ -23,7 +23,9 @@ Point any MCP client at the command:
 
 The transport is a dependency-free implementation of the MCP stdio protocol
 (newline-delimited JSON-RPC 2.0, protocol `2025-06-18`), so it runs anywhere Python
-does.
+does. For per-client setup (Claude Code, Claude Desktop, Cursor, VS Code, …) **and**
+how to instruct the agent to actually use the canon, see
+[using-with-agents](using-with-agents.md).
 
 ## Tools
 

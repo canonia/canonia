@@ -27,7 +27,10 @@ site:
                              # `mkdocs-material` is a reserved future backend.
 
 index:
-  backend: sqlite-vec        # embedding index for semantic search / dedup (STUB)
+  backend: sqlite            # embedding index store. 'sqlite' = brute-force NumPy
+                             # cosine (implemented). 'sqlite-vec'/'auto' are a
+                             # capability-gated seam that falls back to 'sqlite'
+                             # today (see indexing.md).
 
 import:                      # source repos the importer reads (dev-time)
   sources:                   # paths are relative to this file (or absolute)
