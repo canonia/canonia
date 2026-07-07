@@ -1,0 +1,271 @@
+# Copyright 2026 André Lopes
+# SPDX-License-Identifier: Apache-2.0
+"""``canonia`` command-line interface.
+
+Subcommands: ``init`` (scaffold a canon), ``import`` (curated / zero-config),
+``validate`` (run the gates), and ``serve`` / ``build`` (not implemented yet).
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+from typing import Dict, List, Optional
+
+from canonia import __version__
+from canonia.config import CONFIG_FILENAME, CanoniaConfig, SourceRepo
+from canonia.graph import Graph
+from canonia.importer import import_curated, import_zeroconfig
+from canonia.importer.plan import ImportPlan
+from canonia.schema import DEFAULT_DOMAINS, Issue
+
+
+# --- helpers ----------------------------------------------------------------
+
+def _load_config(canon: Optional[str]) -> Optional[CanoniaConfig]:
+    start = Path(canon) if canon else Path.cwd()
+    try:
+        return CanoniaConfig.load(start)
+    except FileNotFoundError:
+        return None
+
+
+def _parse_sources(pairs: List[str]) -> Dict[str, SourceRepo]:
+    """Parse ``--source name=path[:prefix]`` flags into a repo registry."""
+    repos: Dict[str, SourceRepo] = {}
+    for pair in pairs or []:
+        if "=" not in pair:
+            raise SystemExit(f"--source expects name=path[:prefix], got {pair!r}")
+        name, rest = pair.split("=", 1)
+        prefix = ""
+        # A trailing ':prefix' is a relative subdir; unix absolute paths have no colon.
+        if ":" in rest:
+            rest, prefix = rest.rsplit(":", 1)
+        repos[name.strip()] = SourceRepo(path=Path(rest).expanduser().resolve(), prefix=prefix)
+    return repos
+
+
+def _graph_from_plan(plan: ImportPlan) -> Graph:
+    graph = Graph()
+    for item in plan.emitted:
+        graph.add(item.concept)
+    return graph
+
+
+def _print_issues(issues: List[Issue]) -> None:
+    for issue in issues:
+        print(f"  ✗ {issue}", file=sys.stderr)
+
+
+# --- commands ---------------------------------------------------------------
+
+def cmd_init(args) -> int:
+    root = Path(args.directory).resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    domains = list(args.domains.split(",")) if args.domains else list(DEFAULT_DOMAINS)
+    cfg = root / CONFIG_FILENAME
+    if cfg.exists() and not args.force:
+        print(f"{cfg} already exists (use --force to overwrite)", file=sys.stderr)
+        return 1
+    cfg.write_text(
+        "# Canonia config — binds this canon to the Canonia framework.\n"
+        "canon:\n"
+        "  root: concepts\n"
+        f"  domains: [{', '.join(domains)}]\n"
+        "schema:\n"
+        '  id_pattern: "^[a-z0-9][a-z0-9-]*$"\n',
+        encoding="utf-8",
+    )
+    for d in domains:
+        (root / "concepts" / d).mkdir(parents=True, exist_ok=True)
+        (root / "concepts" / d / ".gitkeep").touch()
+    # Keep generated (and potentially sensitive) output out of version control.
+    gitignore = root / ".gitignore"
+    if not gitignore.exists():
+        gitignore.write_text(
+            "# Canonia generated output — never commit/publish (may hold sensitive\n"
+            "# content); serve the site privately behind an auth edge instead.\n"
+            ".canonia/\nsite/\n",
+            encoding="utf-8",
+        )
+    print(f"Initialized canon at {root} (domains: {', '.join(domains)})")
+    return 0
+
+
+def cmd_import(args) -> int:
+    config = _load_config(args.canon)
+    domains = config.domains if config else list(DEFAULT_DOMAINS)
+    id_pattern = config.id_pattern if config else None
+
+    out_dir = Path(args.out).resolve() if args.out else (
+        config.concepts_dir if config else Path.cwd() / "concepts"
+    )
+
+    if args.zero_config:
+        if not args.domain:
+            print("--zero-config requires --domain", file=sys.stderr)
+            return 1
+        plan = import_zeroconfig(Path(args.zero_config), domain=args.domain, repo=args.repo)
+    else:
+        if not args.mapping:
+            print("curated import requires --mapping (or use --zero-config)", file=sys.stderr)
+            return 1
+        repos: Dict[str, SourceRepo] = dict(config.sources) if config else {}
+        repos.update(_parse_sources(args.source))
+        plan = import_curated(Path(args.mapping), repos)
+
+    plan.out_dir = out_dir
+
+    # Always show what would happen, then gate-check the emitted graph in memory.
+    graph = _graph_from_plan(plan)
+    kwargs = {"domains": domains}
+    if id_pattern:
+        kwargs["id_pattern"] = id_pattern
+    issues = graph.validate(**kwargs)
+
+    committed = False
+    if args.commit:
+        written = plan.write(out_dir)
+        committed = True
+        print(plan.render_report(committed=True))
+        print(f"\nWrote {len(written)} files under {out_dir}")
+    else:
+        print(plan.render_report(committed=False))
+        print(f"\n(dry-run — no files written; re-run with --commit to write to {out_dir})")
+
+    print()
+    if issues:
+        print(f"Gates: {len(issues)} issue(s) — schema / dangling-reference:", file=sys.stderr)
+        _print_issues(issues)
+        return 1
+    print(f"Gates: OK — {len(graph)} concepts, schema + dangling-reference passed.")
+    return 0
+
+
+def cmd_validate(args) -> int:
+    config = _load_config(args.canon)
+    if args.directory:
+        concepts_dir = Path(args.directory)
+    elif config:
+        concepts_dir = config.concepts_dir
+    else:
+        concepts_dir = Path.cwd() / "concepts"
+
+    if not concepts_dir.exists():
+        print(f"no concepts directory at {concepts_dir}", file=sys.stderr)
+        return 1
+
+    graph = Graph.load(concepts_dir)
+    kwargs = {"domains": config.domains if config else list(DEFAULT_DOMAINS)}
+    if config:
+        kwargs["id_pattern"] = config.id_pattern
+    issues = graph.validate(**kwargs)
+    if issues:
+        print(f"{len(issues)} issue(s) in {len(graph)} concepts:", file=sys.stderr)
+        _print_issues(issues)
+        return 1
+    print(f"OK — {len(graph)} concepts, schema + dangling-reference gates passed.")
+    return 0
+
+
+def cmd_serve(args) -> int:
+    from canonia import server
+
+    canon = args.canon or "."
+    if _load_config(canon) is None:
+        print(f"no {CONFIG_FILENAME} at or above {Path(canon).resolve()}", file=sys.stderr)
+        return 1
+    # --autocommit / --no-autocommit override canonia.yml's git.autocommit.
+    try:
+        server.serve(canon, autocommit=args.autocommit)
+    except KeyboardInterrupt:  # pragma: no cover
+        return 0
+    return 0
+
+
+def cmd_build(args) -> int:
+    from canonia import site
+
+    canon = args.canon or "."
+    if _load_config(canon) is None:
+        print(f"no {CONFIG_FILENAME} at or above {Path(canon).resolve()}", file=sys.stderr)
+        return 1
+    result = site.build_site(canon, out_dir=args.out)
+    print(
+        f"Built site → {result['out_dir']}\n"
+        f"  {result['pages']} pages · {result['live']} live · "
+        f"{result['redirects']} redirects · {result['archived']} archived"
+    )
+    if result["broken_links"]:
+        print(f"  ! {result['broken_links']} broken wikilink(s) in bodies", file=sys.stderr)
+    print(f"  open {result['out_dir']}/index.html")
+    # The site has NO built-in access control (governance is a future module).
+    print(
+        "  ⚠ no access control — serve privately (tailnet/loopback) or behind an\n"
+        "    auth edge; do NOT expose it on a public interface. See docs/deploying.md.",
+        file=sys.stderr,
+    )
+    return 0
+
+
+# --- parser -----------------------------------------------------------------
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="canonia", description=__doc__.splitlines()[0])
+    parser.add_argument("--version", action="version", version=f"canonia {__version__}")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    p_init = sub.add_parser("init", help="scaffold a new canon (canonia.yml + concepts/)")
+    p_init.add_argument("directory", nargs="?", default=".", help="canon root (default: .)")
+    p_init.add_argument("--domains", help="comma-separated domain list")
+    p_init.add_argument("--force", action="store_true", help="overwrite an existing canonia.yml")
+    p_init.set_defaults(func=cmd_init)
+
+    p_imp = sub.add_parser("import", help="import concepts (dry-run by default)")
+    p_imp.add_argument("--mapping", help="curated mode: path to mapping.yml")
+    p_imp.add_argument("--zero-config", help="zero-config mode: a folder of markdown")
+    p_imp.add_argument("--domain", help="zero-config: domain for all imported files")
+    p_imp.add_argument("--repo", default="local", help="zero-config: provenance repo name")
+    p_imp.add_argument(
+        "--source", action="append", default=[],
+        help="curated: source repo as name=path[:prefix] (repeatable)",
+    )
+    p_imp.add_argument("--canon", help="canon dir (for canonia.yml); default: search from cwd")
+    p_imp.add_argument("--out", help="output concepts dir (default: canon's concepts/)")
+    p_imp.add_argument("--commit", action="store_true", help="write files (default: dry-run)")
+    p_imp.set_defaults(func=cmd_import)
+
+    p_val = sub.add_parser("validate", help="run schema + dangling-reference gates")
+    p_val.add_argument("directory", nargs="?", help="concepts dir (default: from canonia.yml)")
+    p_val.add_argument("--canon", help="canon dir (for canonia.yml)")
+    p_val.set_defaults(func=cmd_validate)
+
+    p_serve = sub.add_parser("serve", help="run the MCP server on stdio")
+    p_serve.add_argument("--canon", help="canon dir (for canonia.yml); default: cwd")
+    p_serve.add_argument(
+        "--autocommit", dest="autocommit", action="store_true", default=None,
+        help="git-commit each write (local only, never pushes); overrides canonia.yml",
+    )
+    p_serve.add_argument(
+        "--no-autocommit", dest="autocommit", action="store_false",
+        help="disable autocommit even if canonia.yml enables it",
+    )
+    p_serve.set_defaults(func=cmd_serve)
+
+    p_build = sub.add_parser("build", help="build the static site (browsable graph + backlinks)")
+    p_build.add_argument("--canon", help="canon dir (for canonia.yml); default: cwd")
+    p_build.add_argument("--out", help="output site dir (default: <canon>/site)")
+    p_build.set_defaults(func=cmd_build)
+
+    return parser
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    return args.func(args)
+
+
+if __name__ == "__main__":  # pragma: no cover
+    raise SystemExit(main())
