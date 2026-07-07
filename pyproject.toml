@@ -14,9 +14,12 @@ keywords = ["mcp", "knowledge-graph", "ai", "agents", "documentation"]
 dependencies = ["PyYAML>=6.0"]
 
 [project.optional-dependencies]
-# Heavier, feature-specific deps land here as the modules that need them ship
-# (mcp for the server, sqlite-vec for the index, mkdocs-material for the site).
-dev = ["pytest>=7"]
+# Heavier, feature-specific deps land here so the base install stays lean.
+# `semantic` powers the embedding index (local ONNX MiniLM + brute-force NumPy
+# cosine over a stdlib-sqlite vector store); everything degrades to keyword
+# search without it. Needs no `sqlite-vec` — that backend is a future seam.
+semantic = ["numpy>=1.21", "onnxruntime>=1.15"]
+dev = ["pytest>=7", "numpy>=1.21", "onnxruntime>=1.15"]
 
 [project.scripts]
 canonia = "canonia.cli:main"

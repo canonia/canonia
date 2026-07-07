@@ -48,7 +48,16 @@ class CanoniaConfig:
     canon_name: str = "canon"
     domains: List[str] = field(default_factory=lambda: list(DEFAULT_DOMAINS))
     id_pattern: str = DEFAULT_ID_PATTERN
-    index_backend: str = "sqlite-vec"
+    # Embedding index (canonia[semantic]). `backend`: only "sqlite" (brute-force
+    # NumPy cosine) is implemented; "sqlite-vec" is a reserved seam. `semantic`
+    # toggles hybrid search in the server; `hybrid_weight` is the semantic share
+    # (0 = keyword only, 1 = semantic only). `model_dir`/`path` override caches.
+    index_backend: str = "sqlite"
+    index_model: str = "all-MiniLM-L6-v2"
+    index_model_dir: Optional[str] = None
+    index_path: Optional[str] = None
+    index_semantic: bool = True
+    index_hybrid_weight: float = 0.5
     mcp_name: str = "canonia"
     site_generator: str = "mkdocs-material"
     # Commit each server write to git automatically (local only — never pushes).
@@ -101,7 +110,12 @@ class CanoniaConfig:
             canon_name=canon.get("name", "canon"),
             domains=list(canon.get("domains", DEFAULT_DOMAINS)),
             id_pattern=schema.get("id_pattern", DEFAULT_ID_PATTERN),
-            index_backend=index.get("backend", "sqlite-vec"),
+            index_backend=index.get("backend", "sqlite"),
+            index_model=index.get("model", "all-MiniLM-L6-v2"),
+            index_model_dir=index.get("model_dir"),
+            index_path=index.get("path"),
+            index_semantic=bool(index.get("semantic", True)),
+            index_hybrid_weight=float(index.get("hybrid_weight", 0.5)),
             mcp_name=mcp.get("name", "canonia"),
             site_generator=site.get("generator", "mkdocs-material"),
             autocommit=bool(git.get("autocommit", False)),

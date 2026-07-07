@@ -7,9 +7,10 @@ One canonical store of single-topic markdown *concepts* that many repos
 a stateless MCP server is the agent interface; a static site gives humans a
 browsable graph; git provides versioning + authorship.
 
-Status: pre-alpha. This package currently ships the schema, the graph gates, and
-the importer (``canonia import``). The MCP server, embedding index, and static
-site are stubs pending implementation — see the module docstrings.
+Status: pre-alpha (v0.1 feature-complete). Ships the schema, the graph gates, the
+importer (``canonia import``), the MCP server (``canonia serve``), the static site
+(``canonia build``), and an optional local semantic index (``canonia index``, the
+``canonia[semantic]`` extra). Governance/access control is a future module.
 """
 
 __version__ = "0.1.0.dev0"

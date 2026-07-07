@@ -7,12 +7,14 @@
   protocol, so it runs on 3.9. (The official `mcp` SDK, if you later prefer it,
   needs Python ≥ 3.10 — the tool logic is transport-agnostic and portable to it.)
 - **git**, if you want authorship/versioning or `serve --autocommit`.
-- Runtime dependency: **PyYAML** only.
+- Runtime dependency: **PyYAML** only. The optional semantic index adds `numpy` +
+  `onnxruntime` (the `[semantic]` extra) — everything else stays dependency-free.
 
 ## Install
 
 ```bash
-pip install canonia
+pip install canonia               # base install (PyYAML only)
+pip install 'canonia[semantic]'   # + local semantic search — see indexing.md
 ```
 
 From source (development):

@@ -1,14 +1,600 @@
 # Copyright 2026 André Lopes
 # SPDX-License-Identifier: Apache-2.0
-"""Embedding index (sqlite-vec) for semantic search + dedup.
+"""Embedding index — local, offline semantic search + near-duplicate detection.
 
-NOT YET IMPLEMENTED. The first importer run does dedup by exact/fuzzy title+slug
-match (the index does not exist until this module is built); see the migration
-plan's honest limitation note.
+Concepts are embedded with a small local sentence model (all-MiniLM-L6-v2, 384-d)
+run through ONNX Runtime; vectors live in a plain stdlib ``sqlite3`` database as
+float32 blobs and search is brute-force cosine in NumPy. At canon scale (hundreds
+to low thousands of concepts) that is instant, needs no server, and — crucially —
+never leaves the machine, so a **private canon stays private**.
+
+Everything here is *optional*. NumPy + ONNX Runtime are the ``canonia[semantic]``
+extra; the model is fetched once from Hugging Face into a local cache. When any
+of that is absent the index simply reports itself unavailable and callers fall
+back to keyword search — the base install stays dependency-free.
+
+Design notes
+------------
+* **Backend seam.** ``index.backend`` in ``canonia.yml`` selects the vector store.
+  Only ``sqlite`` (this brute-force store) is implemented. ``sqlite-vec`` is left
+  as a drop-in for when you run on a Python whose ``sqlite3`` allows loadable
+  extensions (macOS system Python does not) and the canon outgrows brute force.
+* **Tokenizer.** A dependency-free WordPiece tokenizer (reads the model's
+  ``vocab.txt``) — no ``transformers``/``tokenizers`` install, matches BERT-uncased
+  preprocessing closely enough for retrieval.
+* **Privacy.** The only network call is a one-time fetch of the *public model*
+  (never canon content), and only from the explicit ``canonia index build`` path.
 """
 
 from __future__ import annotations
 
+import hashlib
+import importlib
+import importlib.util
+import os
+import sqlite3
+import unicodedata
+import urllib.request
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
-def build_index(*args, **kwargs):  # pragma: no cover - placeholder
-    raise NotImplementedError("canonia index: embedding index not implemented yet.")
+# --- optional heavy deps (the canonia[semantic] extra) ----------------------
+# NumPy is cheap to import and used throughout, so bind it eagerly. ONNX Runtime
+# costs ~1s to import, so it stays lazy (only loaded when a model is actually
+# instantiated) — merely importing this module must not pay that cost.
+try:  # pragma: no cover - import guard
+    import numpy as _np
+except ImportError:  # pragma: no cover
+    _np = None
+
+_ort = None
+
+
+def _load_ort():
+    """Import ONNX Runtime on first use; cache it. Raises if unavailable."""
+    global _ort
+    if _ort is None:
+        _ort = importlib.import_module("onnxruntime")
+    return _ort
+
+
+DEFAULT_MODEL = "all-MiniLM-L6-v2"
+EMBED_DIM = 384
+MAX_TOKENS = 256
+# Where the public ONNX model + vocab are fetched from (never canon content).
+_HF_REPO = "Xenova/all-MiniLM-L6-v2"
+_HF_FILES = {"model": "onnx/model_quantized.onnx", "vocab": "vocab.txt"}
+_HF_URL = "https://huggingface.co/{repo}/resolve/main/{file}"
+
+Logger = Callable[[str], None]
+
+
+def deps_available() -> bool:
+    """True when the semantic extra (NumPy + ONNX Runtime) is importable."""
+    return _np is not None and importlib.util.find_spec("onnxruntime") is not None
+
+
+def _require_deps() -> None:
+    if not deps_available():
+        raise RuntimeError(
+            "semantic index needs NumPy + ONNX Runtime — install the extra:\n"
+            "    pip install 'canonia[semantic]'"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Model cache + download
+# ---------------------------------------------------------------------------
+
+def default_model_dir(model: str = DEFAULT_MODEL) -> Path:
+    """Cache dir for a model, overridable via ``$CANONIA_MODEL_DIR``."""
+    base = os.environ.get("CANONIA_MODEL_DIR")
+    root = Path(base).expanduser() if base else Path.home() / ".cache" / "canonia" / "models"
+    return root / model
+
+
+def ensure_model(
+    model_dir: Path, *, log: Optional[Logger] = None, allow_download: bool = True
+) -> Dict[str, Path]:
+    """Return local paths to the model + vocab, downloading them if missing.
+
+    The files are the *public* MiniLM model, never canon content. With
+    ``allow_download=False`` (the ``serve`` path) missing files are left missing
+    rather than fetched over the network — the caller degrades to keyword search.
+    """
+    model_dir = Path(model_dir)
+    model_dir.mkdir(parents=True, exist_ok=True)
+    paths = {"model": model_dir / "model.onnx", "vocab": model_dir / "vocab.txt"}
+    for key, dest in paths.items():
+        if dest.exists() and dest.stat().st_size > 0:
+            continue
+        if not allow_download:
+            raise FileNotFoundError(f"model file not cached: {dest} (run `canonia index build`)")
+        url = _HF_URL.format(repo=_HF_REPO, file=_HF_FILES[key])
+        if log:
+            log(f"downloading {_HF_FILES[key]} → {dest} …")
+        _download(url, dest)
+    return paths
+
+
+def _download(url: str, dest: Path) -> None:
+    tmp = dest.with_suffix(dest.suffix + ".part")
+    req = urllib.request.Request(url, headers={"User-Agent": "canonia-index"})
+    with urllib.request.urlopen(req, timeout=120) as resp, open(tmp, "wb") as fh:
+        while True:
+            chunk = resp.read(1 << 16)
+            if not chunk:
+                break
+            fh.write(chunk)
+    tmp.replace(dest)
+
+
+# ---------------------------------------------------------------------------
+# WordPiece tokenizer (dependency-free BERT-uncased preprocessing)
+# ---------------------------------------------------------------------------
+
+class WordPieceTokenizer:
+    """A minimal BERT-uncased WordPiece tokenizer built from ``vocab.txt``."""
+
+    def __init__(self, vocab: Dict[str, int]):
+        self.vocab = vocab
+        self.unk = vocab.get("[UNK]", 100)
+        self.cls = vocab.get("[CLS]", 101)
+        self.sep = vocab.get("[SEP]", 102)
+        self.pad = vocab.get("[PAD]", 0)
+
+    @classmethod
+    def from_file(cls, path: Path) -> "WordPieceTokenizer":
+        vocab: Dict[str, int] = {}
+        with open(path, encoding="utf-8") as fh:
+            for i, line in enumerate(fh):
+                vocab[line.rstrip("\n")] = i
+        return cls(vocab)
+
+    def encode(self, text: str, max_tokens: int = MAX_TOKENS) -> List[int]:
+        """Text → token ids, wrapped in [CLS] … [SEP] and length-capped."""
+        pieces: List[int] = [self.cls]
+        # room for [CLS] and [SEP]
+        budget = max_tokens - 2
+        for word in self._basic_tokens(text):
+            if len(pieces) - 1 >= budget:
+                break
+            pieces.extend(self._wordpiece(word))
+        pieces = pieces[: max_tokens - 1]
+        pieces.append(self.sep)
+        return pieces
+
+    # --- basic tokenization (clean, lowercase, strip accents, split punct) --
+
+    def _basic_tokens(self, text: str) -> List[str]:
+        out: List[str] = []
+        for token in self._whitespace_split(self._clean(text)):
+            token = self._strip_accents(token.lower())
+            out.extend(self._split_punct(token))
+        return out
+
+    @staticmethod
+    def _clean(text: str) -> str:
+        out = []
+        for ch in text or "":
+            cp = ord(ch)
+            if cp == 0 or cp == 0xFFFD or _is_control(ch):
+                continue
+            out.append(" " if _is_whitespace(ch) else ch)
+        return "".join(out)
+
+    @staticmethod
+    def _whitespace_split(text: str) -> List[str]:
+        return text.split()
+
+    @staticmethod
+    def _strip_accents(text: str) -> str:
+        return "".join(
+            ch for ch in unicodedata.normalize("NFD", text)
+            if unicodedata.category(ch) != "Mn"
+        )
+
+    @staticmethod
+    def _split_punct(token: str) -> List[str]:
+        out: List[str] = []
+        cur: List[str] = []
+        for ch in token:
+            if _is_punctuation(ch):
+                if cur:
+                    out.append("".join(cur))
+                    cur = []
+                out.append(ch)
+            else:
+                cur.append(ch)
+        if cur:
+            out.append("".join(cur))
+        return out
+
+    # --- wordpiece (greedy longest-match, ## continuation) ------------------
+
+    def _wordpiece(self, word: str) -> List[int]:
+        if len(word) > 100:
+            return [self.unk]
+        ids: List[int] = []
+        start = 0
+        n = len(word)
+        while start < n:
+            end = n
+            cur = None
+            while start < end:
+                sub = word[start:end]
+                if start > 0:
+                    sub = "##" + sub
+                if sub in self.vocab:
+                    cur = self.vocab[sub]
+                    break
+                end -= 1
+            if cur is None:
+                return [self.unk]  # any unmatched piece ⇒ whole word is [UNK]
+            ids.append(cur)
+            start = end
+        return ids
+
+
+def _is_control(ch: str) -> bool:
+    if ch in ("\t", "\n", "\r"):
+        return False
+    return unicodedata.category(ch).startswith("C")
+
+
+def _is_whitespace(ch: str) -> bool:
+    if ch in (" ", "\t", "\n", "\r"):
+        return True
+    return unicodedata.category(ch) == "Zs"
+
+
+def _is_punctuation(ch: str) -> bool:
+    cp = ord(ch)
+    if (33 <= cp <= 47) or (58 <= cp <= 64) or (91 <= cp <= 96) or (123 <= cp <= 126):
+        return True
+    return unicodedata.category(ch).startswith("P")
+
+
+# ---------------------------------------------------------------------------
+# Embedding model (ONNX Runtime)
+# ---------------------------------------------------------------------------
+
+class EmbeddingModel:
+    """Mean-pooled, L2-normalized MiniLM sentence embeddings via ONNX Runtime."""
+
+    def __init__(self, model_path: Path, vocab_path: Path):
+        _require_deps()
+        ort = _load_ort()
+        self.tokenizer = WordPieceTokenizer.from_file(Path(vocab_path))
+        opts = ort.SessionOptions()
+        opts.intra_op_num_threads = max(1, (os.cpu_count() or 2) - 1)
+        self.session = ort.InferenceSession(
+            str(model_path), sess_options=opts, providers=["CPUExecutionProvider"]
+        )
+        self._input_names = {i.name for i in self.session.get_inputs()}
+        outs = self.session.get_outputs()
+        # Prefer the token-level hidden state; fall back to the first output.
+        self._output_name = next(
+            (o.name for o in outs if o.name == "last_hidden_state"), outs[0].name
+        )
+
+    @classmethod
+    def load(
+        cls, model_dir: Path, *, log: Optional[Logger] = None, allow_download: bool = True
+    ) -> "EmbeddingModel":
+        paths = ensure_model(Path(model_dir), log=log, allow_download=allow_download)
+        return cls(paths["model"], paths["vocab"])
+
+    def embed(self, texts: Sequence[str], batch_size: int = 32):
+        """Embed ``texts`` → an (N, 384) float32 NumPy array of unit vectors."""
+        _require_deps()
+        vectors = []
+        for i in range(0, len(texts), batch_size):
+            vectors.append(self._embed_batch(list(texts[i : i + batch_size])))
+        if not vectors:
+            return _np.zeros((0, EMBED_DIM), dtype=_np.float32)
+        return _np.vstack(vectors)
+
+    def embed_one(self, text: str):
+        return self.embed([text])[0]
+
+    def _embed_batch(self, texts: List[str]):
+        token_lists = [self.tokenizer.encode(t) for t in texts]
+        maxlen = max((len(t) for t in token_lists), default=1)
+        n = len(texts)
+        input_ids = _np.zeros((n, maxlen), dtype=_np.int64)
+        mask = _np.zeros((n, maxlen), dtype=_np.int64)
+        for r, toks in enumerate(token_lists):
+            input_ids[r, : len(toks)] = toks
+            mask[r, : len(toks)] = 1
+        feed = {"input_ids": input_ids, "attention_mask": mask}
+        if "token_type_ids" in self._input_names:
+            feed["token_type_ids"] = _np.zeros((n, maxlen), dtype=_np.int64)
+        feed = {k: v for k, v in feed.items() if k in self._input_names}
+        hidden = self.session.run([self._output_name], feed)[0]  # (n, seq, dim)
+        return _mean_pool_normalize(hidden, mask)
+
+
+def _mean_pool_normalize(hidden, mask):
+    m = mask.astype(_np.float32)[..., None]           # (n, seq, 1)
+    summed = (hidden.astype(_np.float32) * m).sum(axis=1)
+    counts = _np.clip(m.sum(axis=1), 1e-9, None)
+    pooled = summed / counts
+    norms = _np.linalg.norm(pooled, axis=1, keepdims=True)
+    return (pooled / _np.clip(norms, 1e-12, None)).astype(_np.float32)
+
+
+# ---------------------------------------------------------------------------
+# The text of a concept that gets embedded
+# ---------------------------------------------------------------------------
+
+def concept_text(concept) -> str:
+    """The retrieval text for a concept: title, summary, tags, then body."""
+    parts = [concept.title or "", concept.summary or ""]
+    if getattr(concept, "tags", None):
+        parts.append(" ".join(concept.tags))
+    if concept.body:
+        parts.append(concept.body)
+    return "\n\n".join(p for p in parts if p).strip()
+
+
+def _content_hash(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+# ---------------------------------------------------------------------------
+# Vector store (stdlib sqlite3 + brute-force NumPy cosine)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class BuildStats:
+    total: int
+    added: int
+    updated: int
+    unchanged: int
+    removed: int
+
+
+class EmbeddingIndex:
+    """A sqlite-backed store of concept vectors with brute-force cosine search.
+
+    Vectors are L2-normalized on write, so cosine similarity is a plain dot
+    product. The whole matrix is loaded into memory for a query — fine at canon
+    scale, and the ``sqlite-vec`` backend is the seam for when it isn't.
+    """
+
+    def __init__(self, db_path: Path, model_name: str = DEFAULT_MODEL):
+        _require_deps()
+        self.db_path = Path(db_path)
+        self.model_name = model_name
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.conn = sqlite3.connect(str(self.db_path))
+        self._init_schema()
+
+    def _init_schema(self) -> None:
+        self.conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS embeddings (
+                id      TEXT PRIMARY KEY,
+                hash    TEXT NOT NULL,
+                domain  TEXT,
+                status  TEXT,
+                vector  BLOB NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
+            """
+        )
+        self.conn.commit()
+
+    def close(self) -> None:
+        self.conn.close()
+
+    def __enter__(self) -> "EmbeddingIndex":
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.close()
+
+    # --- build --------------------------------------------------------------
+
+    def build(
+        self,
+        concepts: Sequence,
+        model: EmbeddingModel,
+        *,
+        log: Optional[Logger] = None,
+    ) -> BuildStats:
+        """Incrementally (re)embed ``concepts``; unchanged bodies are skipped.
+
+        Merged redirect tombstones are not indexed (they carry no real body).
+        """
+        indexable = [c for c in concepts if c.status != "merged"]
+        want = {c.id: concept_text(c) for c in indexable}
+        by_id = {c.id: c for c in indexable}
+        have = {row[0]: row[1] for row in self.conn.execute("SELECT id, hash FROM embeddings")}
+
+        to_embed = [cid for cid, text in want.items() if have.get(cid) != _content_hash(text)]
+        unchanged = len(want) - len(to_embed)
+        added = sum(1 for cid in to_embed if cid not in have)
+        updated = len(to_embed) - added
+
+        if to_embed:
+            if log:
+                log(f"embedding {len(to_embed)} concept(s) ({unchanged} unchanged) …")
+            vectors = model.embed([want[cid] for cid in to_embed])
+            rows = []
+            for cid, vec in zip(to_embed, vectors):
+                c = by_id[cid]
+                rows.append((cid, _content_hash(want[cid]), c.domain, c.status, _vec_to_blob(vec)))
+            self.conn.executemany(
+                "INSERT OR REPLACE INTO embeddings (id, hash, domain, status, vector) "
+                "VALUES (?, ?, ?, ?, ?)",
+                rows,
+            )
+
+        stale = [cid for cid in have if cid not in want]
+        if stale:
+            self.conn.executemany("DELETE FROM embeddings WHERE id = ?", [(c,) for c in stale])
+
+        self._set_meta("model", self.model_name)
+        self._set_meta("dim", str(EMBED_DIM))
+        self.conn.commit()
+        return BuildStats(len(want), added, updated, unchanged, len(stale))
+
+    def _set_meta(self, key: str, value: str) -> None:
+        self.conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", (key, value))
+
+    # --- read ---------------------------------------------------------------
+
+    def __len__(self) -> int:
+        return self.conn.execute("SELECT COUNT(*) FROM embeddings").fetchone()[0]
+
+    def _matrix(self, domain: Optional[str] = None) -> Tuple[List[str], object]:
+        sql = "SELECT id, vector FROM embeddings"
+        args: tuple = ()
+        if domain:
+            sql += " WHERE domain = ?"
+            args = (domain,)
+        ids, rows = [], []
+        for cid, blob in self.conn.execute(sql, args):
+            ids.append(cid)
+            rows.append(_blob_to_vec(blob))
+        if not rows:
+            return [], _np.zeros((0, EMBED_DIM), dtype=_np.float32)
+        return ids, _np.vstack(rows)
+
+    def search(
+        self,
+        query_vec,
+        limit: int = 10,
+        domain: Optional[str] = None,
+    ) -> List[Tuple[str, float]]:
+        """Return ``[(concept_id, cosine)]`` for the closest ``limit`` vectors."""
+        ids, matrix = self._matrix(domain)
+        if not ids:
+            return []
+        # np.dot, not the @ operator: float32 matmul trips spurious FPE
+        # RuntimeWarnings on some NumPy/BLAS builds (2.0.x); np.dot does not.
+        sims = _np.dot(matrix, _np.asarray(query_vec, dtype=_np.float32))
+        order = _np.argsort(-sims)[: max(1, limit)]
+        return [(ids[i], float(sims[i])) for i in order]
+
+    def duplicate_pairs(self, threshold: float = 0.9) -> List[Tuple[str, str, float]]:
+        """All concept pairs whose cosine similarity is ≥ ``threshold``."""
+        ids, matrix = self._matrix()
+        if len(ids) < 2:
+            return []
+        sims = _np.dot(matrix, matrix.T)  # np.dot avoids float32-matmul FPE warnings
+        pairs: List[Tuple[str, str, float]] = []
+        n = len(ids)
+        for i in range(n):
+            for j in range(i + 1, n):
+                s = float(sims[i, j])
+                if s >= threshold:
+                    pairs.append((ids[i], ids[j], s))
+        pairs.sort(key=lambda p: -p[2])
+        return pairs
+
+
+def _vec_to_blob(vec) -> bytes:
+    return _np.asarray(vec, dtype=_np.float32).tobytes()
+
+
+def _blob_to_vec(blob: bytes):
+    return _np.frombuffer(blob, dtype=_np.float32)
+
+
+# ---------------------------------------------------------------------------
+# High-level entry points (used by the CLI + server)
+# ---------------------------------------------------------------------------
+
+def index_path_for(config) -> Path:
+    """Where a canon's embedding DB lives (``.canonia/index/embeddings.db``)."""
+    custom = getattr(config, "index_path", None)
+    if custom:
+        p = Path(custom)
+        return p if p.is_absolute() else (config.root_dir / p)
+    return config.root_dir / ".canonia" / "index" / "embeddings.db"
+
+
+def open_index(config, *, create: bool = False) -> Optional[EmbeddingIndex]:
+    """Open the canon's index if it exists (or ``create``); else ``None``.
+
+    Returns ``None`` — never raises — when the semantic extra is missing or the
+    index has not been built, so callers can degrade to keyword search.
+    """
+    if not deps_available():
+        return None
+    path = index_path_for(config)
+    if not create and not path.exists():
+        return None
+    try:
+        return EmbeddingIndex(path, model_name=getattr(config, "index_model", DEFAULT_MODEL))
+    except Exception:  # pragma: no cover - defensive
+        return None
+
+
+def build_index(config, concepts, *, log: Optional[Logger] = None) -> BuildStats:
+    """Build/update the canon's embedding index. Requires the semantic extra."""
+    _require_deps()
+    model = EmbeddingModel.load(_model_dir_for(config), log=log)
+    with EmbeddingIndex(index_path_for(config), model_name=getattr(config, "index_model", DEFAULT_MODEL)) as idx:
+        return idx.build(concepts, model, log=log)
+
+
+def _model_dir_for(config) -> Path:
+    custom = getattr(config, "index_model_dir", None)
+    model = getattr(config, "index_model", DEFAULT_MODEL)
+    if custom:
+        p = Path(custom).expanduser()
+        return p if p.is_absolute() else (config.root_dir / p)
+    return default_model_dir(model)
+
+
+class SemanticSearcher:
+    """Server-side helper: embed a query and score concepts by cosine.
+
+    Loads the model lazily and caches it (loading ONNX is the slow part); reopens
+    the — static, built-offline — index per call so it never holds a stale handle.
+    Never downloads at serve time: a missing model just disables semantic scoring.
+    Returns an empty mapping (not an error) whenever anything is unavailable, so
+    the server always has keyword search to fall back on.
+    """
+
+    def __init__(self, config):
+        self.config = config
+        self._model: Optional[EmbeddingModel] = None
+        # Only viable if the extra is installed AND an index has been built.
+        self._ok = deps_available() and index_path_for(config).exists()
+
+    @property
+    def available(self) -> bool:
+        return self._ok
+
+    def _model_or_none(self) -> Optional[EmbeddingModel]:
+        if self._model is None and self._ok:
+            try:
+                self._model = EmbeddingModel.load(_model_dir_for(self.config), allow_download=False)
+            except Exception:
+                self._ok = False
+        return self._model
+
+    def scores(self, query: str, domain: Optional[str] = None) -> Dict[str, float]:
+        """``{concept_id: cosine}`` for the query, or ``{}`` if unavailable."""
+        if not self._ok or not (query or "").strip():
+            return {}
+        model = self._model_or_none()
+        if model is None:
+            return {}
+        idx = open_index(self.config)
+        if idx is None:
+            return {}
+        try:
+            qv = model.embed_one(query)
+            hits = idx.search(qv, limit=10_000_000, domain=domain)
+        except Exception:  # pragma: no cover - defensive
+            return {}
+        finally:
+            idx.close()
+        return {cid: score for cid, score in hits}

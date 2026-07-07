@@ -29,7 +29,7 @@ does.
 
 | Tool | Purpose |
 |---|---|
-| `search` | Keyword search over id/title/summary/tags/body; ranked hits. Filter by `domain`; `include_archived` to include archived. Redirect tombstones are never results. |
+| `search` | Search over id/title/summary/tags/body; ranked hits. Keyword by default; **hybrid keyword + semantic** once a [semantic index](indexing.md) is built (`mode: "hybrid"`, results gain a `semantic` score). Filter by `domain`; `include_archived` to include archived. Redirect tombstones are never results. |
 | `get` | Fetch a concept: frontmatter, body, and `referenced_by` (backlinks). A merged id transparently **follows the redirect** to its canonical concept unless `follow=false`. |
 | `create` | Create a new concept (fails if the id exists). |
 | `update` | Update fields on an existing concept; `append_body` adds a paragraph; changing `domain` relocates the file. |

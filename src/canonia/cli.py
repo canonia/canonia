@@ -3,7 +3,8 @@
 """``canonia`` command-line interface.
 
 Subcommands: ``init`` (scaffold a canon), ``import`` (curated / zero-config),
-``validate`` (run the gates), and ``serve`` / ``build`` (not implemented yet).
+``validate`` (run the gates), ``index`` (build/query the semantic index),
+``serve`` (MCP server), and ``build`` (static site).
 """
 
 from __future__ import annotations
@@ -184,6 +185,83 @@ def cmd_serve(args) -> int:
     return 0
 
 
+def cmd_index(args) -> int:
+    from canonia import index
+
+    config = _load_config(args.canon)
+    if config is None:
+        print(f"no {CONFIG_FILENAME} at or above {Path(args.canon or '.').resolve()}", file=sys.stderr)
+        return 1
+    if not index.deps_available():
+        print("semantic index needs the extra: pip install 'canonia[semantic]'", file=sys.stderr)
+        return 1
+
+    if args.action == "build":
+        graph = Graph.load(config.concepts_dir)
+        stats = index.build_index(
+            config, list(graph.concepts.values()),
+            log=lambda m: print(f"  {m}", file=sys.stderr),
+        )
+        print(f"Index built → {index.index_path_for(config)}")
+        print(
+            f"  {stats.total} concepts · +{stats.added} new · ~{stats.updated} changed · "
+            f"{stats.unchanged} unchanged · -{stats.removed} removed"
+        )
+        return 0
+
+    if args.action == "stats":
+        idx = index.open_index(config)
+        if idx is None:
+            print("no index yet — run: canonia index build", file=sys.stderr)
+            return 1
+        with idx:
+            model = idx.conn.execute("SELECT value FROM meta WHERE key='model'").fetchone()
+            print(f"Index: {index.index_path_for(config)}")
+            print(f"  {len(idx)} vectors · model {model[0] if model else '?'} · backend sqlite (brute-force cosine)")
+            if config.index_backend not in ("sqlite", "sqlite-vec"):
+                print(f"  ! canonia.yml requests backend '{config.index_backend}' (not implemented)", file=sys.stderr)
+        return 0
+
+    if args.action == "search":
+        if not args.query:
+            print("index search needs a query", file=sys.stderr)
+            return 1
+        searcher = index.SemanticSearcher(config)
+        if not searcher.available:
+            print("no index yet — run: canonia index build", file=sys.stderr)
+            return 1
+        scores = searcher.scores(args.query, args.domain)
+        graph = Graph.load(config.concepts_dir)
+        ranked = sorted(scores.items(), key=lambda kv: -kv[1])[: max(1, args.k)]
+        for cid, sim in ranked:
+            c = graph.concepts.get(cid)
+            print(f"  {sim:.3f}  {cid}  — {c.title if c else ''}")
+        if not ranked:
+            print("  (no results)")
+        return 0
+
+    if args.action == "dupes":
+        idx = index.open_index(config)
+        if idx is None:
+            print("no index yet — run: canonia index build", file=sys.stderr)
+            return 1
+        with idx:
+            pairs = idx.duplicate_pairs(args.threshold)
+        graph = Graph.load(config.concepts_dir)
+        if not pairs:
+            print(f"No concept pairs above cosine {args.threshold}.")
+            return 0
+        print(f"{len(pairs)} near-duplicate pair(s) at cosine ≥ {args.threshold}:")
+        for a, b, sim in pairs:
+            ta = graph.concepts.get(a)
+            tb = graph.concepts.get(b)
+            print(f"  {sim:.3f}  {a} ({ta.title if ta else '?'})  ~  {b} ({tb.title if tb else '?'})")
+        return 0
+
+    print(f"unknown index action: {args.action}", file=sys.stderr)  # pragma: no cover
+    return 1
+
+
 def cmd_build(args) -> int:
     from canonia import site
 
@@ -252,6 +330,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="disable autocommit even if canonia.yml enables it",
     )
     p_serve.set_defaults(func=cmd_serve)
+
+    p_index = sub.add_parser("index", help="semantic embedding index (build / search / dupes / stats)")
+    p_index.add_argument("action", choices=["build", "search", "dupes", "stats"])
+    p_index.add_argument("query", nargs="?", help="search: the query text")
+    p_index.add_argument("--canon", help="canon dir (for canonia.yml); default: cwd")
+    p_index.add_argument("--domain", help="search: restrict to one domain")
+    p_index.add_argument("--k", type=int, default=10, help="search: max results (default 10)")
+    p_index.add_argument("--threshold", type=float, default=0.9, help="dupes: min cosine (default 0.9)")
+    p_index.set_defaults(func=cmd_index)
 
     p_build = sub.add_parser("build", help="build the static site (browsable graph + backlinks)")
     p_build.add_argument("--canon", help="canon dir (for canonia.yml); default: cwd")

@@ -11,17 +11,26 @@ Concepts link to concepts (a graph); a stateless MCP server is the agent
 interface; a static site gives humans a browsable graph + backlinks; git provides
 versioning + authorship.
 
-**Status: pre-alpha.** Identity reserved (GitHub org `canonia`, npm + PyPI
-`canonia`, Apache-2.0). **schema + graph gates + importer + MCP server + static
-site + docs guide are functional** (`canonia import` / `validate` / `serve` /
-`build`, curated + zero-config, 39 tests passing); the embedding index is the
-remaining stub, access.py a no-op seam. MCP tools: search / get / create / update /
+**Status: pre-alpha, v0.1 feature-complete.** Identity reserved (GitHub org
+`canonia`, npm + PyPI `canonia`, Apache-2.0). **schema + graph gates + importer +
+MCP server + static site + semantic index + docs guide are functional** (`canonia
+import` / `validate` / `index` / `serve` / `build`, curated + zero-config, 48 tests
+passing); access.py a no-op seam. MCP tools: search / get / create / update /
 list_domains + lifecycle (deprecate / merge / archive / restore / remove). MCP
 transport and the site are dependency-free stdlib impls (no `mcp` SDK — needs Python
-≥3.10, env is 3.9; site is self-contained HTML, not MkDocs). Docs in `docs/`.
-**Security:** the site has NO built-in auth (governance is future) — serve it
-privately (tailnet/loopback) or behind an auth edge; see docs/deploying.md.
-Remaining v0.1: embedding index (sqlite-vec) for semantic search/dedup.
+≥3.10, env is 3.9; site is self-contained HTML, not MkDocs). The **semantic index**
+(`canonia index build|search|dupes|stats`) is an optional `canonia[semantic]` extra
+(numpy + onnxruntime): local all-MiniLM-L6-v2 ONNX embeddings, a pure-Python
+WordPiece tokenizer, float32 vectors in a stdlib `sqlite3` store with brute-force
+NumPy cosine — fully offline (a private canon never leaves the box; model is fetched
+once). `search` goes hybrid keyword+semantic once an index exists; degrades to
+keyword-only without the extra/index. **Deviation from the sqlite-vec plan:** macOS
+system Python's `sqlite3` lacks loadable-extension support, so sqlite-vec can't load
+— `index.backend: sqlite` (brute force) is the working default; `sqlite-vec` is a
+reserved seam for large canons on an extension-capable Python. Docs in `docs/` (see
+`docs/indexing.md`). **Security:** the site has NO built-in auth (governance is
+future) — serve it privately (tailnet/loopback) or behind an auth edge; `.canonia/`
+(holds the derived index) is git-ignored. See docs/deploying.md.
 
 ## Key decisions
 
@@ -58,7 +67,7 @@ canonia/
   markdown_html.py  # dependency-free markdown -> HTML (static site)
   importer/         # canonia import — curated (mapping.yml) + zero-config
   server.py         # MCP server (stdlib stdio): search/get/create/update + lifecycle
-  index.py          # embedding index (sqlite-vec) — STUB
+  index.py          # semantic index: ONNX MiniLM + WordPiece + sqlite/NumPy cosine
   site.py           # static site — self-contained HTML (not MkDocs; generator seam kept)
   access.py         # SEAM: no-op access filter (governance module later)
 docs/               # install / configure / maintain / use guide (dogfooded)

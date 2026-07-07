@@ -58,6 +58,10 @@ class CanonService:
         self.identity = identity or access.ANONYMOUS
         # CLI flag (autocommit=True/False) overrides canonia.yml's git.autocommit.
         self.autocommit = self.config.autocommit if autocommit is None else autocommit
+        # Semantic searcher is built lazily on the first search that needs it, so
+        # the server starts (and stays keyword-only canons stay) dependency-free.
+        self._searcher = None
+        self._searcher_ready = False
 
     # --- helpers ------------------------------------------------------------
 
@@ -100,7 +104,7 @@ class CanonService:
     ) -> dict:
         graph = self._graph()
         terms = _tokens(query)
-        scored = []
+        candidates = []
         for concept in self._visible(graph.concepts.values()):
             if concept.status == "merged":
                 continue  # redirect tombstones are never search results
@@ -108,22 +112,64 @@ class CanonService:
                 continue
             if domain and concept.domain != domain:
                 continue
-            score = _score(concept, terms)
-            if score > 0 or not terms:
-                scored.append((score, concept))
-        scored.sort(key=lambda sc: (-sc[0], sc[1].id))
-        results = [
-            {
+            candidates.append(concept)
+
+        # Semantic scores (empty dict ⇒ keyword-only: no index, extra, or terms).
+        sem = self._semantic_scores(query, domain) if terms else {}
+        weight = self.config.index_hybrid_weight if sem else 0.0
+        keyword = {c.id: _score(c, terms) for c in candidates}
+        kw_max = max(keyword.values(), default=0) or 1
+
+        scored = []
+        for c in candidates:
+            kw = keyword[c.id]
+            sim = sem.get(c.id, 0.0)
+            if terms and kw <= 0 and sim < _SEM_FLOOR:
+                continue  # neither a keyword nor a semantic hit
+            # Hybrid blend when semantic is live; exact keyword score otherwise so
+            # keyword-only behavior (and its integer scores) is unchanged.
+            combined = ((1 - weight) * (kw / kw_max) + weight * max(sim, 0.0)) if sem else float(kw)
+            scored.append((combined, kw, sim, c))
+        scored.sort(key=lambda t: (-t[0], t[3].id))
+
+        results = []
+        for combined, kw, sim, c in scored[: max(1, int(limit))]:
+            row = {
                 "id": c.id,
                 "title": c.title,
                 "domain": c.domain,
                 "status": c.status,
                 "summary": c.summary,
-                "score": score,
+                "score": round(combined, 4) if sem else kw,
             }
-            for score, c in scored[: max(1, int(limit))]
-        ]
-        return {"query": query, "count": len(results), "results": results}
+            if sem:
+                row["semantic"] = round(sim, 4)
+            results.append(row)
+        out = {"query": query, "count": len(results), "results": results}
+        if sem:
+            out["mode"] = "hybrid"
+        return out
+
+    def _semantic_scores(self, query: str, domain: Optional[str]) -> Dict[str, float]:
+        """Lazy hybrid-search hook: ``{id: cosine}`` or ``{}`` if unavailable.
+
+        Builds the searcher once. Any failure (missing extra, unbuilt index,
+        model load error) collapses to ``{}`` so search stays keyword-only.
+        """
+        if not self.config.index_semantic:
+            return {}
+        if not self._searcher_ready:
+            self._searcher_ready = True
+            try:
+                from canonia import index
+
+                searcher = index.SemanticSearcher(self.config)
+                self._searcher = searcher if searcher.available else None
+            except Exception:  # pragma: no cover - defensive
+                self._searcher = None
+        if self._searcher is None:
+            return {}
+        return self._searcher.scores(query, domain)
 
     def get(self, id: str, include_body: bool = True, follow: bool = True) -> dict:
         graph = self._graph()
@@ -454,6 +500,11 @@ def _union_sources(a: List[dict], b: List[dict]) -> List[dict]:
 
 
 # --- search scoring ---------------------------------------------------------
+
+# Minimum cosine for a concept with no keyword hit to still surface in hybrid
+# search — keeps semantically-adjacent-but-unrelated concepts out of results.
+_SEM_FLOOR = 0.25
+
 
 def _tokens(text: str) -> List[str]:
     out, cur = [], []

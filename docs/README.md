@@ -6,8 +6,8 @@ canonical store of single-topic markdown *concepts* that many repos *reference* 
 server is the agent interface; a static site gives humans a browsable view; git
 provides versioning + authorship.
 
-> **Status: pre-alpha.** Schema, gates, importer, MCP server, and static site work
-> today. The embedding index is a stub; access control (governance) is a **future
+> **Status: pre-alpha.** Schema, gates, importer, MCP server, static site, and the
+> local semantic index all work today. Access control (governance) is a **future
 > module** — see [deploying.md](deploying.md) for how to keep a canon private in the
 > meantime. **This matters: the site has no built-in auth.**
 
@@ -18,6 +18,7 @@ provides versioning + authorship.
 | `canonia init` | scaffold a new canon (`canonia.yml`, `concepts/`, `.gitignore`) | [installing](installing.md) |
 | `canonia import` | seed a canon from existing repos (curated or zero-config) | [importing](importing.md) |
 | `canonia validate` | run the schema + dangling-reference gates | [maintaining](maintaining.md) |
+| `canonia index` | build the local semantic index; search / find duplicates | [indexing](indexing.md) |
 | `canonia serve` | run the MCP server (agents read/write concepts) | [serving](serving.md) |
 | `canonia build` | generate the static site (browsable graph + backlinks) | [deploying](deploying.md) |
 
@@ -36,8 +37,9 @@ cd my-canon
 canonia import --zero-config ../some-docs --domain process --commit
 
 canonia validate            # gates must pass
+canonia index build         # optional: local semantic index (pip install 'canonia[semantic]')
 canonia build               # -> ./site  (serve it PRIVATELY — see deploying.md)
-canonia serve               # MCP server on stdio
+canonia serve               # MCP server on stdio (hybrid search when an index exists)
 ```
 
 ## Core model
