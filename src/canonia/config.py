@@ -59,7 +59,9 @@ class CanoniaConfig:
     index_semantic: bool = True
     index_hybrid_weight: float = 0.5
     mcp_name: str = "canonia"
-    site_generator: str = "mkdocs-material"
+    # 'builtin' = the self-contained HTML backend (the only one implemented);
+    # 'mkdocs-material' etc. are a reserved backend seam.
+    site_generator: str = "builtin"
     # Commit each server write to git automatically (local only — never pushes).
     autocommit: bool = False
     sources: Dict[str, SourceRepo] = field(default_factory=dict)
@@ -117,7 +119,7 @@ class CanoniaConfig:
             index_semantic=bool(index.get("semantic", True)),
             index_hybrid_weight=float(index.get("hybrid_weight", 0.5)),
             mcp_name=mcp.get("name", "canonia"),
-            site_generator=site.get("generator", "mkdocs-material"),
+            site_generator=site.get("generator", "builtin"),
             autocommit=bool(git.get("autocommit", False)),
             sources=sources,
         )
