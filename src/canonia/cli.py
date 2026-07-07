@@ -118,6 +118,13 @@ def cmd_import(args) -> int:
 
     plan.out_dir = out_dir
 
+    # --prune reconciles the canon to this import: concept files the sources no
+    # longer produce are removed. Computed against the pre-import disk state so
+    # the same list is reported (dry-run) and applied (commit). With prune on,
+    # the committed canon equals the emitted set, so the gate check below — run
+    # on the emitted graph — is an accurate prediction of the final on-disk state.
+    pruned = plan.reconcile(out_dir) if getattr(args, "prune", False) else None
+
     # Always show what would happen, then gate-check the emitted graph in memory.
     graph = _graph_from_plan(plan)
     kwargs = {"domains": domains}
@@ -128,12 +135,16 @@ def cmd_import(args) -> int:
     committed = False
     if args.commit:
         written = plan.write(out_dir)
+        removed = plan.apply_prune(pruned) if pruned else []
         committed = True
-        print(plan.render_report(committed=True))
+        print(plan.render_report(committed=True, pruned=pruned))
         print(f"\nWrote {len(written)} files under {out_dir}")
+        if removed:
+            print(f"Pruned {len(removed)} files no longer produced by the sources")
     else:
-        print(plan.render_report(committed=False))
-        print(f"\n(dry-run — no files written; re-run with --commit to write to {out_dir})")
+        print(plan.render_report(committed=False, pruned=pruned))
+        note = "" if not pruned else f" ({len(pruned)} would be pruned)"
+        print(f"\n(dry-run — no files written; re-run with --commit to write to {out_dir}){note}")
 
     if getattr(args, "check_dupes", False):
         _report_dupes(plan, config, out_dir, args.dupe_threshold)
@@ -363,6 +374,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_imp.add_argument("--canon", help="canon dir (for canonia.yml); default: search from cwd")
     p_imp.add_argument("--out", help="output concepts dir (default: canon's concepts/)")
     p_imp.add_argument("--commit", action="store_true", help="write files (default: dry-run)")
+    p_imp.add_argument(
+        "--prune", action="store_true",
+        help="remove existing concept files the sources no longer produce "
+             "(reconcile; shown in the dry-run before --commit)",
+    )
     p_imp.add_argument(
         "--check-dupes", dest="check_dupes", action="store_true",
         help="flag near-duplicate concepts (semantic; needs the 'semantic' extra)",

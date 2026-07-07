@@ -93,6 +93,29 @@ It reports two kinds of overlap (default cosine ≥ 0.9, tune with `--dupe-thres
 It is advisory: it never fails the import, and it is skipped (with a note) if the
 extra isn't installed.
 
+### Reconciling deletions (`--prune`)
+
+By default the importer only **adds and updates** — a concept that used to be
+produced but no longer is (its source doc was removed, or its `id` changed) is
+left behind as an orphan. Add `--prune` to **reconcile**: existing concept files
+the sources no longer produce are removed.
+
+```bash
+canonia import --mapping migration/mapping.yml --prune             # dry-run: lists what would be removed
+canonia import --mapping migration/mapping.yml --prune --commit    # write updates + delete orphans
+```
+
+The dry-run lists every file it would delete (`orphan` = id gone; `moved` = same
+id re-emitted to a different file, so the old one is stale) — nothing is removed
+until `--commit`. Because pruning makes the committed canon **equal to the import
+output**, the dry-run's schema + dangling-reference gate is an accurate preview of
+the result: if pruning a concept would orphan a reference some surviving concept
+still points at, the gate fails *before* anything is written.
+
+`--prune` is opt-in and unforgiving: it deletes any concept under the output dir
+the import doesn't produce, **including ones you authored by hand** if they aren't
+in your sources. Review the dry-run, and rely on git to recover if needed.
+
 After importing, always run the gates:
 
 ```bash

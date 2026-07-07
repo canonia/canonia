@@ -21,6 +21,10 @@ WHOLE_FILE = "whole-file"   # source is a dedicated file, used verbatim
 SECTION = "section"         # a heading section was extracted by anchor
 STUB = "stub"               # body could not be extracted -> summary + review note
 
+# Why an existing concept file is a prune candidate under --prune.
+ORPHAN = "orphan"           # the sources no longer emit this id at all
+MOVED = "moved"             # the id is re-emitted, but to a different file (stale here)
+
 
 @dataclass
 class EmittedConcept:
@@ -34,6 +38,15 @@ class EmittedConcept:
     @property
     def rel_path(self) -> str:
         return f"{self.concept.domain}/{self.concept.id}.md"
+
+
+@dataclass
+class Pruned:
+    """An existing concept file this import would remove under --prune."""
+
+    id: str
+    path: Path
+    reason: str                    # ORPHAN | MOVED
 
 
 @dataclass
@@ -78,9 +91,49 @@ class ImportPlan:
             written.append(target)
         return written
 
+    # --- reconciliation (--prune) ------------------------------------------
+
+    def reconcile(self, out_dir: Path) -> List["Pruned"]:
+        """Concept files under ``out_dir`` this import would NOT (re)produce.
+
+        Reconcile by id: an existing concept whose id is absent from the emitted
+        set is an :data:`ORPHAN`; one whose id is re-emitted but to a different
+        file (e.g. its domain changed) is :data:`MOVED` — stale at its old path.
+        Ids the import re-emits at the same path are left for :meth:`write` to
+        overwrite. With every non-emitted file pruned, the committed canon equals
+        the emitted set exactly, so the in-memory gate check predicts the result.
+        """
+        from canonia.graph import Graph  # local: avoid import cycle at module load
+
+        out_dir = Path(out_dir)
+        if not out_dir.exists():
+            return []
+        targets = {e.concept.id: (out_dir / e.rel_path).resolve() for e in self.emitted}
+        pruned: List[Pruned] = []
+        for cid, concept in Graph.load(out_dir).concepts.items():
+            if concept.path is None:
+                continue
+            path = Path(concept.path).resolve()
+            if cid not in targets:
+                pruned.append(Pruned(cid, path, ORPHAN))
+            elif targets[cid] != path:
+                pruned.append(Pruned(cid, path, MOVED))
+        return sorted(pruned, key=lambda p: str(p.path))
+
+    def apply_prune(self, pruned: List["Pruned"]) -> List[Path]:
+        """Delete the reconciled files. Caller gates this behind --commit."""
+        removed: List[Path] = []
+        for item in pruned:
+            if item.path.exists():
+                item.path.unlink()
+                removed.append(item.path)
+        return removed
+
     # --- reporting ----------------------------------------------------------
 
-    def render_report(self, *, committed: bool = False) -> str:
+    def render_report(
+        self, *, committed: bool = False, pruned: Optional[List["Pruned"]] = None
+    ) -> str:
         lines: List[str] = []
         verb = "Imported" if committed else "Would import"
         lines.append(f"{verb} {self.total} concepts")
@@ -109,7 +162,23 @@ class ImportPlan:
                 for w in e.warnings:
                     lines.append(f"    - {e.rel_path}: {w}")
 
+        if pruned:
+            pverb = "Pruned" if committed else "Would prune"
+            lines.append("")
+            lines.append(f"  {pverb} {len(pruned)} concept(s) the sources no longer produce:")
+            for p in pruned:
+                lines.append(f"    - {p.reason}: {self._display_path(p.path)}")
+
         for w in self.warnings:
             lines.append(f"  ! {w}")
 
         return "\n".join(lines)
+
+    def _display_path(self, path: Path) -> str:
+        """Path relative to the output dir when possible, else absolute."""
+        if self.out_dir is not None:
+            try:
+                return str(Path(path).resolve().relative_to(Path(self.out_dir).resolve()))
+            except ValueError:
+                pass
+        return str(path)
