@@ -48,10 +48,12 @@ class CanoniaConfig:
     canon_name: str = "canon"
     domains: List[str] = field(default_factory=lambda: list(DEFAULT_DOMAINS))
     id_pattern: str = DEFAULT_ID_PATTERN
-    # Embedding index (canonia[semantic]). `backend`: only "sqlite" (brute-force
-    # NumPy cosine) is implemented; "sqlite-vec" is a reserved seam. `semantic`
-    # toggles hybrid search in the server; `hybrid_weight` is the semantic share
-    # (0 = keyword only, 1 = semantic only). `model_dir`/`path` override caches.
+    # Embedding index (canonia[semantic]). `backend`: "sqlite" (brute-force NumPy
+    # cosine) is the only implemented store; "sqlite-vec" is a capability-gated
+    # seam and "auto" picks the best available — both fall back to brute force
+    # today (see index.resolve_backend). `semantic` toggles hybrid search in the
+    # server; `hybrid_weight` is the semantic share (0 = keyword only, 1 =
+    # semantic only). `model_dir`/`path` override caches.
     index_backend: str = "sqlite"
     index_model: str = "all-MiniLM-L6-v2"
     index_model_dir: Optional[str] = None

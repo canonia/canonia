@@ -84,6 +84,82 @@ def _require_deps() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Backend selection
+# ---------------------------------------------------------------------------
+# Only the brute-force ``sqlite`` store (below) is implemented. ``sqlite-vec`` is
+# a capability-gated seam: it needs a Python whose ``sqlite3`` was compiled with
+# loadable-extension support (a *build* property — macOS system Python lacks it
+# at every version) AND the ``sqlite-vec`` package installed. Until that store is
+# built, every backend resolves to ``sqlite`` — but resolution reports an honest
+# reason so a config author who asked for ``sqlite-vec`` learns exactly why they
+# got brute force.
+
+BACKENDS = ("sqlite", "sqlite-vec", "auto")
+
+
+def sqlite_loadable_extensions() -> bool:
+    """True when this interpreter's ``sqlite3`` can load compiled extensions.
+
+    Probed on a throwaway in-memory connection. On a build without support the
+    method is either absent (``AttributeError``) or raises when toggled — both
+    mean "no". This is a build property of the ``sqlite3`` module, not a version.
+    """
+    conn = sqlite3.connect(":memory:")
+    try:
+        conn.enable_load_extension(True)
+        conn.enable_load_extension(False)
+        return True
+    except (AttributeError, sqlite3.OperationalError, sqlite3.NotSupportedError):
+        return False
+    finally:
+        conn.close()
+
+
+def sqlite_vec_available() -> bool:
+    """True when the ``sqlite-vec`` package is importable."""
+    return importlib.util.find_spec("sqlite_vec") is not None
+
+
+@dataclass
+class BackendChoice:
+    """The backend that will actually run, plus why."""
+
+    name: str          # what runs today — always "sqlite" until the vec store lands
+    requested: str     # what canonia.yml asked for
+    reason: str        # human-readable rationale (esp. on fallback)
+    fell_back: bool    # True when the requested backend could not be honored
+
+
+def resolve_backend(requested: Optional[str]) -> BackendChoice:
+    """Resolve a configured ``index.backend`` to the store that will run.
+
+    ``sqlite`` → brute force. ``sqlite-vec`` / ``auto`` → brute force too (the
+    vec store is unimplemented), with a reason that distinguishes *why*: no
+    loadable-extension support, package not installed, or store-not-built-yet.
+    ``auto`` is a silent fallback (it asked us to choose); an explicit
+    ``sqlite-vec`` request that we can't honor sets ``fell_back``.
+    """
+    requested = (requested or "sqlite").strip()
+
+    if requested == "sqlite":
+        return BackendChoice("sqlite", requested, "brute-force cosine", False)
+
+    if requested in ("sqlite-vec", "auto"):
+        if not sqlite_loadable_extensions():
+            why = "this Python's sqlite3 can't load extensions"
+        elif not sqlite_vec_available():
+            why = "sqlite-vec not installed (pip install sqlite-vec)"
+        else:
+            why = "sqlite-vec store not yet implemented"
+        # `auto` asked us to pick, so its fallback is expected, not a warning.
+        return BackendChoice("sqlite", requested, f"{why}; using brute-force", requested != "auto")
+
+    return BackendChoice(
+        "sqlite", requested, f"unknown backend '{requested}'; using brute-force", True
+    )
+
+
+# ---------------------------------------------------------------------------
 # Model cache + download
 # ---------------------------------------------------------------------------
 

@@ -245,6 +245,9 @@ def cmd_index(args) -> int:
 
     if args.action == "build":
         graph = Graph.load(config.concepts_dir)
+        choice = index.resolve_backend(config.index_backend)
+        if choice.fell_back:
+            print(f"  ! canonia.yml requests backend '{choice.requested}' — {choice.reason}", file=sys.stderr)
         stats = index.build_index(
             config, list(graph.concepts.values()),
             log=lambda m: print(f"  {m}", file=sys.stderr),
@@ -263,10 +266,11 @@ def cmd_index(args) -> int:
             return 1
         with idx:
             model = idx.conn.execute("SELECT value FROM meta WHERE key='model'").fetchone()
+            choice = index.resolve_backend(config.index_backend)
             print(f"Index: {index.index_path_for(config)}")
-            print(f"  {len(idx)} vectors · model {model[0] if model else '?'} · backend sqlite (brute-force cosine)")
-            if config.index_backend not in ("sqlite", "sqlite-vec"):
-                print(f"  ! canonia.yml requests backend '{config.index_backend}' (not implemented)", file=sys.stderr)
+            print(f"  {len(idx)} vectors · model {model[0] if model else '?'} · backend {choice.name} ({choice.reason})")
+            if choice.fell_back:
+                print(f"  ! canonia.yml requests backend '{choice.requested}' — {choice.reason}", file=sys.stderr)
         return 0
 
     if args.action == "search":
