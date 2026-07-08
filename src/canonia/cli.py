@@ -19,7 +19,7 @@ from canonia.config import CONFIG_FILENAME, CanoniaConfig, SourceRepo
 from canonia.graph import Graph
 from canonia.importer import import_curated, import_zeroconfig
 from canonia.importer.plan import ImportPlan
-from canonia.schema import DEFAULT_DOMAINS, Issue
+from canonia.schema import DEFAULT_DOMAINS, DEFAULT_ID_PATTERN, Issue
 
 # --- helpers ----------------------------------------------------------------
 
@@ -39,9 +39,11 @@ def _parse_sources(pairs: List[str]) -> Dict[str, SourceRepo]:
             raise SystemExit(f"--source expects name=path[:prefix], got {pair!r}")
         name, rest = pair.split("=", 1)
         prefix = ""
-        # A trailing ':prefix' is a relative subdir; unix absolute paths have no colon.
-        if ":" in rest:
-            rest, prefix = rest.rsplit(":", 1)
+        # A trailing ':prefix' is a relative subdir. A Windows drive colon is
+        # not a separator: in 'C:\repo' the colon is followed by a path slash.
+        head, sep, tail = rest.rpartition(":")
+        if sep and not (len(head) == 1 and head.isalpha() and tail[:1] in ("\\", "/")):
+            rest, prefix = head, tail
         repos[name.strip()] = SourceRepo(path=Path(rest).expanduser().resolve(), prefix=prefix)
     return repos
 
@@ -81,7 +83,15 @@ def _print_issues(issues: List[Issue]) -> None:
 def cmd_init(args) -> int:
     root = Path(args.directory).resolve()
     root.mkdir(parents=True, exist_ok=True)
-    domains = list(args.domains.split(",")) if args.domains else list(DEFAULT_DOMAINS)
+    if args.domains:
+        # Strip whitespace around commas: "process, lore" must not create a
+        # ' lore' directory that mismatches the parsed domain name.
+        domains = [d.strip() for d in args.domains.split(",") if d.strip()]
+        if not domains:
+            print("--domains parsed to an empty list", file=sys.stderr)
+            return 1
+    else:
+        domains = list(DEFAULT_DOMAINS)
     cfg = root / CONFIG_FILENAME
     if cfg.exists() and not args.force:
         print(f"{cfg} already exists (use --force to overwrite)", file=sys.stderr)
@@ -92,7 +102,7 @@ def cmd_init(args) -> int:
         "  root: concepts\n"
         f"  domains: [{', '.join(domains)}]\n"
         "schema:\n"
-        '  id_pattern: "^[a-z0-9][a-z0-9-]*$"\n',
+        f'  id_pattern: "{DEFAULT_ID_PATTERN}"\n',
         encoding="utf-8",
     )
     for d in domains:

@@ -305,3 +305,12 @@ def test_server_search_keyword_only_without_index(tmp_path):
     result = CanonService(tmp_path).search("alpha", limit=5)
     assert "mode" not in result                       # no index ⇒ plain keyword
     assert isinstance(result["results"][0]["score"], int)
+
+
+def test_vocab_from_file_strips_crlf(tmp_path: Path):
+    # A CRLF-checked-out vocab.txt (Windows autocrlf) must not produce
+    # 'token\r' keys — that tokenizes every input to [UNK].
+    vocab_path = tmp_path / "vocab.txt"
+    vocab_path.write_bytes(b"[PAD]\r\n[UNK]\r\ntest\r\n")
+    tok = index.WordPieceTokenizer.from_file(vocab_path)
+    assert "test" in tok.vocab and "test\r" not in tok.vocab

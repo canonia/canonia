@@ -241,7 +241,9 @@ class WordPieceTokenizer:
         vocab: Dict[str, int] = {}
         with open(path, encoding="utf-8") as fh:
             for i, line in enumerate(fh):
-                vocab[line.rstrip("\n")] = i
+                # rstrip both CR and LF: a CRLF-checked-out vocab.txt would
+                # otherwise store 'token\r' keys and tokenize everything [UNK].
+                vocab[line.rstrip("\r\n")] = i
         return cls(vocab)
 
     def encode(self, text: str, max_tokens: int = MAX_TOKENS) -> List[int]:
