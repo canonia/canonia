@@ -300,9 +300,10 @@ def cmd_index(args) -> int:
             log=lambda m: print(f"  {m}", file=sys.stderr),
         )
         print(f"Index built → {index.index_path_for(config)}")
+        retag = f" · {stats.retagged} retagged" if stats.retagged else ""
         print(
             f"  {stats.total} concepts · +{stats.added} new · ~{stats.updated} changed · "
-            f"{stats.unchanged} unchanged · -{stats.removed} removed"
+            f"{stats.unchanged} unchanged · -{stats.removed} removed{retag}"
         )
         return 0
 

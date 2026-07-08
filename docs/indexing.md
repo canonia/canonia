@@ -77,7 +77,12 @@ index:
 
 The server reads the index as of the last **build**; concepts written via MCP are
 found by keyword immediately but only join semantic results after the next
-`canonia index build`. A concept with no vector yet is scored on keywords alone
+`canonia index build`. Rebuilds are cheap: only concepts whose text changed are
+re-embedded; a domain/status-only change (e.g. a concept relocated to another
+domain) just retags the stored row in place. Changing `index.model` wipes and
+re-embeds the whole index on the next build (two embedding spaces must never
+mix), and until that rebuild happens the server refuses to score queries
+against the old vectors — search degrades to keyword-only. A concept with no vector yet is scored on keywords alone
 (it is **not** blended with a zero semantic score, which would systematically
 down-rank the newest knowledge), its result row carries no `semantic` field, and
 the response reports how many matched concepts the index hasn't caught up with:
