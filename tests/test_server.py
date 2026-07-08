@@ -197,6 +197,26 @@ def test_merge_repoint_rewrites_inbound_references(tmp_path: Path):
     assert svc.get("a")["references"] == ["c"]  # a now points at c directly
 
 
+def test_merge_is_transactional_on_validation_failure(tmp_path: Path):
+    # A merge that fails validation must write NOTHING: previously the target
+    # was saved (absorbing the source's provenance) before the source's
+    # validation error fired, leaving a half-merged canon with no tombstone.
+    svc = _cluster(tmp_path)
+    legacy = Concept(id="legacy", title="Legacy", domain="process", summary="",
+                     source=[{"repo": "old", "path": "legacy.md"}], body="Old notes.")
+    (tmp_path / "concepts" / "process" / "legacy.md").write_text(
+        legacy.to_markdown(), encoding="utf-8"
+    )
+    target_path = tmp_path / "concepts" / "process" / "c.md"
+    before = target_path.read_text(encoding="utf-8")
+
+    with pytest.raises(ToolError):
+        svc.merge("legacy", into="c")   # legacy has no summary -> invalid
+
+    assert target_path.read_text(encoding="utf-8") == before  # no absorbed provenance
+    assert svc.get("legacy", follow=False)["status"] != "merged"  # no tombstone
+
+
 def test_merge_rejects_target_that_is_a_redirect(tmp_path: Path):
     svc = _cluster(tmp_path)
     svc.merge("b", into="c")  # b -> c

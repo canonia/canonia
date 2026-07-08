@@ -99,9 +99,10 @@ before non-trivial work; keep its statuses current when fixing items. Highlights
 still true until marked fixed there: concurrency is last-writer-wins (the
 "optimistic concurrency" stance has no conflict detection yet); identity/git
 attribution is dead code (server always ANONYMOUS, autocommit off by default);
-the semantic index goes stale on MCP writes and hybrid search down-ranks
-un-indexed new concepts; flat ids make future namespacing a migration — reserve
-a separator before users exist.
+the semantic index goes stale on MCP writes (fresh concepts stay keyword-only,
+reported via `"unindexed": N` in search results, until `canonia index build`);
+flat ids make future namespacing a migration — reserve a separator before
+users exist.
 
 ## Working agreements
 
