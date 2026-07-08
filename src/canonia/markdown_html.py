@@ -178,7 +178,11 @@ class _BlockRenderer:
         # Both groups arrive already HTML-escaped; escaping the target again
         # corrupts '&' in query strings (&amp;amp; -> a literally-broken href).
         label, target = m.group(1), m.group(2).strip()
-        if target.startswith(("http://", "https://", "mailto:", "#", "/")):
+        # Site-absolute '/x' is fine; protocol-relative '//evil.com' is an
+        # off-site link in disguise and falls through to plain text below.
+        if target.startswith(("http://", "https://", "mailto:", "#")) or (
+            target.startswith("/") and not target.startswith("//")
+        ):
             return f'<a href="{target}" rel="noopener">{label}</a>'
         # Relative markdown link — try to resolve to a concept page. The
         # resolver expects the author's raw target, not the escaped form.

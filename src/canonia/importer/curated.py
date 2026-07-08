@@ -76,7 +76,17 @@ def _build_body(spec: ConceptSpec, resolver: SourceResolver, warnings: List[str]
         warnings.append("no source entries in mapping")
         return _stub(spec, "no source in mapping"), STUB, "no source"
 
-    text = resolver.read(primary)
+    try:
+        text = resolver.read(primary)
+    except ValueError as exc:
+        # Containment refusal from SourceRepo.resolve — never read (or leak
+        # into a concept body) a file outside the source repo.
+        warnings.append(f"refused: {exc}")
+        return (
+            _stub(spec, f"refused source path: {primary.repo}:{primary.raw_path}"),
+            STUB,
+            f"refused source {primary.repo}:{primary.raw_path}",
+        )
     if text is None:
         warnings.append(f"source not found on disk: {primary.repo}:{primary.raw_path}")
         return (
