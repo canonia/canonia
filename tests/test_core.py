@@ -147,3 +147,25 @@ def _process_concept(cid: str, refs) -> str:
         source=[{"repo": "r", "path": f"{cid}.md"}], references=list(refs),
     )
     return c.to_markdown()
+
+
+def test_default_id_pattern_rejects_malformed_kebab():
+    for bad in ("foo-", "-foo", "foo--bar", "foo\n", "foo bar"):
+        c = _good()
+        c.id = bad
+        assert any(i.field == "id" for i in validate_concept(c, domains=["infra"])), bad
+    assert validate_concept(_good(), domains=["infra"]) == []  # kebab still fine
+
+
+def test_graph_load_skips_hidden_directories(tmp_path: Path):
+    root = tmp_path / "concepts"
+    ok = Concept(id="ok", title="Ok", domain="process", summary="s",
+                 source=[{"repo": "r", "path": "ok.md"}])
+    (root / "process").mkdir(parents=True)
+    (root / "process" / "ok.md").write_text(ok.to_markdown(), encoding="utf-8")
+    (root / ".canonia").mkdir()
+    (root / ".canonia" / "sneaky.md").write_text(
+        ok.to_markdown().replace("id: ok", "id: sneaky"), encoding="utf-8"
+    )
+    (root / "process" / ".draft.md").write_text(ok.to_markdown(), encoding="utf-8")
+    assert set(Graph.load(root).concepts) == {"ok"}

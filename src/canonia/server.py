@@ -25,7 +25,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 
 from canonia import __version__, access
 from canonia.config import CanoniaConfig
@@ -148,8 +148,15 @@ class CanonService:
         limit: int = 10,
         include_archived: bool = False,
     ) -> dict:
+        if limit < 1:
+            raise ToolError("limit must be a positive integer")
         graph = self._graph()
         terms = _tokens(query)
+        if not terms:
+            # Nothing indexable to match (empty or punctuation-only query) —
+            # returning arbitrary score-0 concepts would just look like results.
+            return {"query": query, "count": 0, "results": [],
+                    "note": "query contains no searchable terms"}
         candidates = []
         for concept in self._visible(graph.concepts.values()):
             if concept.status == "merged":
@@ -191,7 +198,7 @@ class CanonService:
         scored.sort(key=lambda t: (-t[0], t[3].id))
 
         results = []
-        for combined, kw, sim, c in scored[: max(1, int(limit))]:
+        for combined, kw, sim, c in scored[:limit]:
             row = {
                 "id": c.id,
                 "title": c.title,
@@ -383,11 +390,21 @@ class CanonService:
         src = graph.concepts.get(id)
         if src is None:
             raise ToolError(f"no concept with id '{id}' to merge")
+        if src.redirect:
+            raise ToolError(
+                f"'{id}' is already merged into '{src.redirect}' — merging again would "
+                "silently re-target every inbound reference; restore it first if that is intended"
+            )
         tgt = graph.concepts.get(into)
         if tgt is None:
             raise ToolError(f"merge target '{into}' does not exist")
         if tgt.redirect:
             raise ToolError(f"target '{into}' is itself a redirect; merge into '{graph.resolve(into)}'")
+        if tgt.status == "archived":
+            raise ToolError(
+                f"merge target '{into}' is archived — the merged content would vanish from "
+                f"search (tombstone and archived target are both excluded); restore '{into}' first"
+            )
 
         tgt.source = _union_sources(tgt.source, src.source)
         src.status, src.redirect = "merged", into
@@ -826,6 +843,45 @@ TOOLS: List[dict] = [
 ]
 
 _TOOL_NAMES = {t["name"] for t in TOOLS}
+_TOOL_SCHEMAS = {t["name"]: t["inputSchema"] for t in TOOLS}
+
+_JSON_TYPES: Dict[str, Union[type, Tuple[type, ...]]] = {
+    "string": str,
+    "integer": int,
+    "boolean": bool,
+    "number": (int, float),
+    "array": list,
+    "object": dict,
+}
+
+
+def _check_args(args: dict, schema: dict) -> Optional[str]:
+    """Validate tool arguments against the tool's inputSchema (names + types).
+
+    ``**kwargs`` binding checks names, not types — without this,
+    ``update(references="abc")`` iterates the string into ['a', 'b', 'c'],
+    three *valid* one-char ids. Returns an error message, or None if OK.
+    """
+    props = schema.get("properties", {})
+    for key in schema.get("required", []):
+        if key not in args:
+            return f"missing required argument '{key}'"
+    for key, value in args.items():
+        spec = props.get(key)
+        if spec is None:
+            return f"unexpected argument '{key}'"
+        expected = _JSON_TYPES.get(spec.get("type", ""))
+        if expected is None or value is None:
+            continue
+        if isinstance(value, bool) and expected is not bool:
+            return f"'{key}' must be {spec['type']}, got boolean"
+        if not isinstance(value, expected):
+            return f"'{key}' must be {spec['type']}, got {type(value).__name__}"
+        if spec.get("type") == "array" and isinstance(value, list):
+            item_type = _JSON_TYPES.get(spec.get("items", {}).get("type", ""))
+            if item_type and not all(isinstance(v, item_type) for v in value):
+                return f"'{key}' must be an array of {spec['items']['type']}"
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -906,9 +962,11 @@ class StdioServer:
         raise _RpcError(METHOD_NOT_FOUND, f"method not found: {method}")
 
     def _initialize(self, params: dict) -> dict:
-        client_version = params.get("protocolVersion")
+        # Negotiate, don't echo: per the MCP spec the server answers with the
+        # requested version only if it supports it, else with its own latest.
+        # This server implements exactly one revision, so that is always it.
         return {
-            "protocolVersion": client_version or PROTOCOL_VERSION,
+            "protocolVersion": PROTOCOL_VERSION,
             "capabilities": {"tools": {"listChanged": False}},
             "serverInfo": {"name": SERVER_NAME, "version": __version__},
         }
@@ -918,6 +976,11 @@ class StdioServer:
         args = params.get("arguments") or {}
         if not isinstance(name, str) or name not in _TOOL_NAMES:
             raise _RpcError(METHOD_NOT_FOUND, f"unknown tool: {name}")
+        if not isinstance(args, dict):
+            return _tool_error(f"invalid arguments for {name}: expected an object")
+        problem = _check_args(args, _TOOL_SCHEMAS[name])
+        if problem:
+            return _tool_error(f"invalid arguments for {name}: {problem}")
         handler = getattr(self.service, name)
         try:
             structured = handler(**args)

@@ -44,7 +44,9 @@ class Graph:
         concepts_root = Path(concepts_root)
         graph = cls()
         for path in sorted(concepts_root.rglob("*.md")):
-            if path.name.startswith("."):
+            # Skip hidden files AND files under hidden directories (.git,
+            # .canonia, editor scratch dirs) — they are not canon content.
+            if any(part.startswith(".") for part in path.relative_to(concepts_root).parts):
                 continue
             concept = Concept.load(path)
             if concept.id and concept.id not in graph.concepts:

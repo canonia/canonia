@@ -416,3 +416,71 @@ def test_stdio_unknown_method_is_protocol_error(tmp_path: Path):
     StdioServer(svc, stdin=io.StringIO(req), stdout=out, stderr=io.StringIO()).run()
     resp = json.loads(out.getvalue().strip())
     assert resp["error"]["code"] == -32601
+
+
+# --- low-audit regressions: merge edges, search inputs, arg types ------------
+
+def test_merge_rejects_archived_target(tmp_path: Path):
+    # Tombstones and archived concepts are both excluded from search, so a
+    # merge into an archived target would make the source's content vanish.
+    svc = _cluster(tmp_path)
+    svc.archive("c")
+    with pytest.raises(ToolError, match="archived"):
+        svc.merge("b", into="c")
+    assert svc.get("b", follow=False)["status"] != "merged"  # nothing written
+
+
+def test_merge_rejects_remerging_a_tombstone(tmp_path: Path):
+    svc = _cluster(tmp_path)
+    svc.merge("b", into="c")
+    with pytest.raises(ToolError, match="already merged"):
+        svc.merge("b", into="a")  # would silently re-target b's redirect
+    assert svc.get("b", follow=False)["redirect"] == "c"
+
+
+def test_search_empty_and_punctuation_queries_return_nothing(tmp_path: Path):
+    svc = CanonService(_canon(tmp_path))
+    for query in ("", "???", "..."):
+        out = svc.search(query)
+        assert out["count"] == 0 and out["results"] == []
+
+
+def test_search_rejects_nonpositive_limit(tmp_path: Path):
+    svc = CanonService(_canon(tmp_path))
+    with pytest.raises(ToolError, match="limit"):
+        svc.search("testing", limit=0)
+
+
+def test_stdio_rejects_wrongly_typed_tool_args(tmp_path: Path):
+    svc = CanonService(_canon(tmp_path))
+    requests = "\n".join([
+        json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                    "params": {"name": "update",
+                               "arguments": {"id": "testing", "references": "abc"}}}),
+        json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                    "params": {"name": "search",
+                               "arguments": {"query": "x", "limit": "5"}}}),
+        json.dumps({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                    "params": {"name": "get", "arguments": {"bogus": True}}}),
+    ]) + "\n"
+    out = io.StringIO()
+    StdioServer(svc, stdin=io.StringIO(requests), stdout=out, stderr=io.StringIO()).run()
+    by_id = {r.get("id"): r for r in _rpc(StdioServer(svc), out)}
+
+    # references="abc" must NOT be accepted and iterated into ['a', 'b', 'c'].
+    assert by_id[1]["result"]["isError"] is True
+    assert "array" in by_id[1]["result"]["content"][0]["text"]
+    assert svc.get("testing")["references"] == []
+    assert by_id[2]["result"]["isError"] is True   # limit as a string
+    assert by_id[3]["result"]["isError"] is True   # unknown arg / missing id
+
+
+def test_stdio_initialize_negotiates_protocol_version(tmp_path: Path):
+    svc = CanonService(_canon(tmp_path))
+    req = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                      "params": {"protocolVersion": "1999-01-01"}}) + "\n"
+    out = io.StringIO()
+    StdioServer(svc, stdin=io.StringIO(req), stdout=out, stderr=io.StringIO()).run()
+    resp = json.loads(out.getvalue().strip())
+    # Not an echo: the server answers with the revision it implements.
+    assert resp["result"]["protocolVersion"] == "2025-06-18"
