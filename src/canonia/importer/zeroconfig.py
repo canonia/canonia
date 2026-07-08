@@ -13,8 +13,9 @@ from __future__ import annotations
 
 import posixpath
 import re
+from collections import Counter
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 from canonia import markdown
 from canonia.importer.plan import WHOLE_FILE, EmittedConcept, ImportPlan
@@ -37,12 +38,28 @@ def import_zeroconfig(
     )
 
     # First pass: assign ids and index by relative path + basename for links.
+    # Files in different directories can share a stem (docs/setup.md and
+    # docs/sub/setup.md both slugify to "setup"); the last write would silently
+    # shadow the others, so colliding stems fall back to a path-derived id
+    # (sub-setup) — assigned here so link resolution targets the final ids —
+    # and each rename is surfaced as a plan warning for review.
+    slug_count = Counter(markdown.slugify(p.stem) for p in files)
     by_rel: Dict[str, str] = {}
     by_base: Dict[str, str] = {}
+    renamed: Dict[str, str] = {}  # rel -> warning
+    taken: Set[str] = set()
     entries: List[tuple] = []  # (path, rel, concept_id)
     for path in files:
         rel = path.relative_to(folder).as_posix()
-        concept_id = markdown.slugify(path.stem)
+        slug = markdown.slugify(path.stem)
+        concept_id = slug if slug_count[slug] == 1 else markdown.slugify(posixpath.splitext(rel)[0])
+        base, n = concept_id, 2
+        while concept_id in taken:
+            concept_id = f"{base}-{n}"
+            n += 1
+        taken.add(concept_id)
+        if concept_id != slug:
+            renamed[rel] = f"id '{slug}' collides with another file; disambiguated to '{concept_id}'"
         entries.append((path, rel, concept_id))
         by_rel[rel] = concept_id
         by_base.setdefault(path.name, concept_id)
@@ -83,7 +100,12 @@ def import_zeroconfig(
             status=str(meta.get("status") or "active"),
             body=new_body,
         )
-        plan.add(EmittedConcept(concept=concept, body_strategy=WHOLE_FILE, body_source=f"{repo}:{rel}"))
+        plan.add(EmittedConcept(
+            concept=concept,
+            body_strategy=WHOLE_FILE,
+            body_source=f"{repo}:{rel}",
+            warnings=[renamed[rel]] if rel in renamed else [],
+        ))
 
     return plan
 

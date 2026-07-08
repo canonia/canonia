@@ -10,7 +10,7 @@ decide, because the importer must never crash on a messy source file.
 from __future__ import annotations
 
 import re
-from typing import List, Optional, Tuple
+from typing import Iterator, List, Optional, Tuple
 
 import yaml
 
@@ -79,13 +79,8 @@ def _tokens(slug: str) -> List[str]:
     return [_stem(t) for t in slug.split("-") if len(t) > 1 and t not in _STOPWORDS]
 
 
-def iter_headings(body: str) -> List[Tuple[int, str, int]]:
-    """Return ``(level, text, line_index)`` for every ATX heading in ``body``.
-
-    Fenced code blocks are skipped so a ``#`` comment inside a code sample is
-    not mistaken for a heading.
-    """
-    headings: List[Tuple[int, str, int]] = []
+def _unfenced_lines(body: str) -> Iterator[Tuple[int, str]]:
+    """Yield ``(line_index, line)`` for every line outside a fenced code block."""
     in_fence = False
     fence = ""
     for i, line in enumerate(body.splitlines()):
@@ -99,6 +94,17 @@ def iter_headings(body: str) -> List[Tuple[int, str, int]]:
             continue
         if in_fence:
             continue
+        yield i, line
+
+
+def iter_headings(body: str) -> List[Tuple[int, str, int]]:
+    """Return ``(level, text, line_index)`` for every ATX heading in ``body``.
+
+    Fenced code blocks are skipped so a ``#`` comment inside a code sample is
+    not mistaken for a heading.
+    """
+    headings: List[Tuple[int, str, int]] = []
+    for i, line in _unfenced_lines(body):
         m = _HEADING_RE.match(line)
         if m:
             headings.append((len(m.group(1)), m.group(2).strip(), i))
@@ -158,8 +164,17 @@ _INLINE_REF_RE = re.compile(r"\[\[\s*([a-z0-9][a-z0-9-]*)\s*(?:\|[^\]]*)?\]\]")
 
 
 def extract_inline_refs(body: str) -> List[str]:
-    """All concept ids referenced via ``[[id]]`` (or ``[[id|label]]``) syntax."""
-    return _INLINE_REF_RE.findall(body)
+    """All concept ids referenced via ``[[id]]`` (or ``[[id|label]]``) syntax.
+
+    Fenced code blocks are skipped (same fence semantics as
+    :func:`iter_headings`): a ``[[id]]`` inside a code sample is not a
+    reference, so it must not fail the dangling-reference gate or count as a
+    remove-blocking dependent.
+    """
+    refs: List[str] = []
+    for _i, line in _unfenced_lines(body):
+        refs.extend(_INLINE_REF_RE.findall(line))
+    return refs
 
 
 # --- markdown link rewriting ------------------------------------------------

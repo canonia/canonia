@@ -161,24 +161,29 @@ class _BlockRenderer:
         return text
 
     def _wikilink(self, m) -> str:
+        # ``alias`` arrives already HTML-escaped (the whole text is escaped
+        # before link substitution); only the resolver's raw title needs it.
         cid, alias = m.group(1), m.group(2)
         if self.resolver:
             resolved = self.resolver(cid)
             if resolved:
                 href, title, known = resolved
                 # An explicit [[id|alias]] wins; otherwise show the concept title.
-                label = alias or title or cid
+                label = alias or (html.escape(title) if title else cid)
                 cls = "" if known else ' class="broken"'
-                return f'<a href="{href}"{cls}>{html.escape(label)}</a>'
-        return f'<span class="broken">{html.escape(alias or cid)}</span>'
+                return f'<a href="{href}"{cls}>{label}</a>'
+        return f'<span class="broken">{alias or cid}</span>'
 
     def _link(self, m) -> str:
+        # Both groups arrive already HTML-escaped; escaping the target again
+        # corrupts '&' in query strings (&amp;amp; -> a literally-broken href).
         label, target = m.group(1), m.group(2).strip()
         if target.startswith(("http://", "https://", "mailto:", "#", "/")):
-            return f'<a href="{html.escape(target)}" rel="noopener">{label}</a>'
-        # Relative markdown link — try to resolve to a concept page.
+            return f'<a href="{target}" rel="noopener">{label}</a>'
+        # Relative markdown link — try to resolve to a concept page. The
+        # resolver expects the author's raw target, not the escaped form.
         if self.resolver:
-            resolved = self.resolver(target)
+            resolved = self.resolver(html.unescape(target))
             if resolved:
                 href, _title, known = resolved
                 cls = "" if known else ' class="broken"'
