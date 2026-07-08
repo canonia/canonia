@@ -33,7 +33,19 @@ class SourceRepo:
     prefix: str = ""
 
     def resolve(self, rel_path: str) -> Path:
-        return self.path / self.prefix / rel_path if self.prefix else self.path / rel_path
+        """Resolve a mapping ``path:`` inside this repo, refusing escapes.
+
+        Mappings are user-editable and often machine-generated: a ``../`` or
+        absolute path must not read files outside the repo root into a
+        concept body (raises ``ValueError``; symlinks are resolved first, so
+        an in-repo link pointing outside is refused too).
+        """
+        root = self.path.resolve()
+        base = root / self.prefix if self.prefix else root
+        candidate = (base / rel_path).resolve()
+        if not candidate.is_relative_to(root):
+            raise ValueError(f"source path {rel_path!r} escapes repo root {self.path.name!r}")
+        return candidate
 
 
 @dataclass

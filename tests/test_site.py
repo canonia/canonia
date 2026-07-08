@@ -141,3 +141,10 @@ def test_build_site_removes_stale_pages(tmp_path: Path):
     assert not stale.exists()                 # dead page deleted on rebuild
     assert result["stale_removed"] == 1
     assert (out / "c" / "ci.html").exists()   # live pages regenerated
+
+
+def test_render_rejects_protocol_relative_links():
+    html = render_markdown("[evil](//evil.com/x) and [ok](/local/page)")
+    assert 'href="//evil.com/x"' not in html               # off-site in disguise
+    assert "evil" in html                                  # collapses to plain text
+    assert '<a href="/local/page" rel="noopener">ok</a>' in html

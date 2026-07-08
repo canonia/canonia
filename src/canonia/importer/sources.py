@@ -57,7 +57,10 @@ class SourceResolver:
         return self._cache[key]
 
     def exists(self, ref: SourceRef) -> bool:
-        return self.read(ref) is not None
+        try:
+            return self.read(ref) is not None
+        except ValueError:  # path escapes the repo — treat as absent
+            return False
 
     # --- body strategy ------------------------------------------------------
 

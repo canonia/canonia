@@ -484,3 +484,33 @@ def test_stdio_initialize_negotiates_protocol_version(tmp_path: Path):
     resp = json.loads(out.getvalue().strip())
     # Not an echo: the server answers with the revision it implements.
     assert resp["result"]["protocolVersion"] == "2025-06-18"
+
+
+def test_tool_results_report_canon_relative_paths(tmp_path: Path):
+    # Absolute host paths (user name, machine layout) must not leak to clients.
+    svc = CanonService(_canon(tmp_path))
+    created = svc.create(id="rel", title="Rel", domain="process", summary="s")
+    assert created["path"] == "concepts/process/rel.md"
+
+    moved = svc.update("rel", domain="infra")
+    assert moved["path"] == "concepts/infra/rel.md"
+    assert moved["moved_from"] == "concepts/process/rel.md"
+
+    removed = svc.remove("rel")
+    assert removed["removed"] == "concepts/infra/rel.md"
+
+
+def test_stdio_oversized_message_rejected_without_killing_server(tmp_path: Path):
+    svc = CanonService(_canon(tmp_path))
+    big = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "ping", "pad": "x" * 500})
+    ping = json.dumps({"jsonrpc": "2.0", "id": 2, "method": "ping"})
+    out = io.StringIO()
+    srv = StdioServer(svc, stdin=io.StringIO(big + "\n" + ping + "\n"),
+                      stdout=out, stderr=io.StringIO())
+    srv.MAX_MESSAGE_CHARS = 100          # shrink the cap for the test
+    srv.run()
+    responses = _rpc(StdioServer(svc), out)
+
+    assert responses[0]["error"]["code"] == -32600
+    assert "size" in responses[0]["error"]["message"]
+    assert responses[1]["result"] == {}  # the next message still got served

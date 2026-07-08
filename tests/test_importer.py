@@ -237,3 +237,26 @@ def test_zeroconfig_suffixes_when_path_ids_still_collide(tmp_path: Path):
     ids = sorted(e.concept.id for e in plan.emitted)
     # sub/setup.md's path-derived id clashes with sub-setup.md -> numeric suffix.
     assert ids == ["setup", "sub-setup", "sub-setup-2"]
+
+
+def test_curated_refuses_paths_escaping_the_repo(tmp_path: Path):
+    # A mapping `path:` (user-editable, often machine-generated) must not pull
+    # arbitrary host files into a concept body.
+    repo = tmp_path / "src"
+    _write(repo / "ok.md", "# Ok\n\nInside the repo.\n")
+    (tmp_path / "secret.txt").write_text("TOP-SECRET-CONTENT", encoding="utf-8")
+    mapping = {"concepts": [
+        {"id": "sneaky-rel", "title": "Sneaky", "domain": "process", "summary": "s",
+         "source": [{"repo": "r", "path": "../secret.txt"}]},
+        {"id": "sneaky-abs", "title": "Sneakier", "domain": "process", "summary": "s",
+         "source": [{"repo": "r", "path": str(tmp_path / "secret.txt")}]},
+    ]}
+    mpath = tmp_path / "mapping.yml"
+    mpath.write_text(yaml.safe_dump(mapping), encoding="utf-8")
+
+    plan = import_curated(mpath, {"r": SourceRepo(path=repo)})
+
+    for emitted in plan.emitted:
+        assert emitted.body_strategy == "stub"
+        assert "TOP-SECRET-CONTENT" not in emitted.concept.body    # nothing leaked
+        assert any("escapes repo root" in w for w in emitted.warnings)
