@@ -24,6 +24,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 
@@ -313,7 +314,12 @@ class CanonService:
         # otherwise be silently shadowed by whichever sorts first on load.
         if id in self._graph().concepts or self._path_for(concept).exists():
             raise ToolError(f"concept '{id}' already exists; use update")
-        path = self._save(concept)
+        try:
+            # Exclusive: the check above is advisory (and covers other
+            # domains); the write itself is what must lose a same-path race.
+            path = self._save(concept, exclusive=True)
+        except FileExistsError:
+            raise ToolError(f"concept '{id}' already exists; use update") from None
         return self._result(concept, [path], f"Create concept '{id}'", created=True)
 
     def update(
@@ -547,7 +553,7 @@ class CanonService:
             raise ToolError(f"identity '{self.identity.name}' may not write '{concept.id}'")
         self._validate(concept)
 
-    def _save(self, concept: Concept) -> Path:
+    def _save(self, concept: Concept, *, exclusive: bool = False) -> Path:
         """Validate then atomically write one concept to disk; return its path."""
         if not access.can_write(concept, self.identity):
             raise ToolError(f"identity '{self.identity.name}' may not write '{concept.id}'")
@@ -558,7 +564,7 @@ class CanonService:
         path = self._path_for(concept)
         self._ensure_contained(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        concept.save(path)
+        concept.save(path, exclusive=exclusive)
         self._index_after_write(concept)
         return path
 
@@ -641,29 +647,53 @@ class CanonService:
             return False, None
         return self._git_commit(paths, message)
 
+    # Lock-contention backoff: another session's autocommit holds git's
+    # .git/index.lock for milliseconds at a time, so retry with doubling
+    # delays (~1.5s worst case) before reporting the collision.
+    _LOCK_RETRIES = 4
+    _LOCK_DELAY = 0.1
+
     def _git_commit(self, paths, message: str):
         """Stage ``paths`` and commit in the canon repo. Returns (committed, note)."""
         root = self.config.root_dir
         author = None
         if self.identity is not access.ANONYMOUS and self.identity.name != "anonymous":
             author = f"{self.identity.name} <{self.identity.kind}@canonia>"
-        try:
-            self._run_git(["add", "--", *[str(p) for p in paths]], root)
-            args = ["commit", "-m", message]
-            if author:
-                args += ["--author", author]
-            proc = self._run_git(args, root)
-        except FileNotFoundError:
-            return False, "autocommit skipped: git not found"
-        if proc.returncode != 0:
+        str_paths = [str(p) for p in paths]
+        # `--only`: commit exactly these paths as they are in the worktree,
+        # via git's own temporary index. Two sessions autocommitting share
+        # .git/index, so a plain `commit` would sweep up whatever the *other*
+        # session had staged (its write lands under this session's message
+        # and author, and its own commit then finds nothing staged).
+        commit_args = ["commit", "--only", "-m", message]
+        if author:
+            commit_args += ["--author", author]
+        commit_args += ["--", *str_paths]
+        delay = self._LOCK_DELAY
+        detail = ""
+        for attempt in range(self._LOCK_RETRIES + 1):
+            try:
+                # `add` is checked too: a lock collision here would leave the
+                # path unknown to git and the pathspec commit would fail.
+                proc = self._run_git(["add", "--", *str_paths], root)
+                if proc.returncode == 0:
+                    proc = self._run_git(commit_args, root)
+            except FileNotFoundError:
+                return False, "autocommit skipped: git not found"
+            if proc.returncode == 0:
+                return True, None
             detail = (proc.stderr or proc.stdout or "").strip()
-            if "nothing to commit" in detail:
+            if "index.lock" in detail and attempt < self._LOCK_RETRIES:
+                time.sleep(delay)
+                delay *= 2
+                continue
+            if "nothing to commit" in detail or "nothing added to commit" in detail:
                 return False, None  # no-op change; not an error
             if "not a git repository" in detail:
                 return False, ("autocommit skipped: the canon is not a git repository "
                                "(run `git init` for versioned, attributable writes)")
             return False, f"autocommit failed: {detail}"
-        return True, None
+        return False, f"autocommit failed: {detail}"
 
     @staticmethod
     def _run_git(args, cwd):
