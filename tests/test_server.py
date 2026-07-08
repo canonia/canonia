@@ -80,7 +80,10 @@ def test_service_create_rejects_duplicate_id_in_another_domain(tmp_path: Path):
 
 def test_write_path_containment_survives_loose_id_pattern(tmp_path: Path):
     # Containment must hold even when canonia.yml loosens the id pattern —
-    # the regex is validation, not the filesystem boundary.
+    # the regex is validation, not the filesystem boundary. The reserved-char
+    # rule rejects '../..' at validation now, so a traversal id can't reach
+    # the write path via create(); still, exercise the containment layer
+    # directly so it keeps holding under any future validation regression.
     (tmp_path / "canonia.yml").write_text(
         "canon:\n  root: concepts\n  domains: [process]\n"
         'schema:\n  id_pattern: "^[a-z0-9./-]+$"\n',
@@ -88,9 +91,27 @@ def test_write_path_containment_survives_loose_id_pattern(tmp_path: Path):
     )
     (tmp_path / "concepts" / "process").mkdir(parents=True)
     svc = CanonService(tmp_path)
-    with pytest.raises(ToolError, match="outside the canon"):
+    with pytest.raises(ToolError):
         svc.create(id="../../escaped", title="X", domain="process", summary="s")
     assert not (tmp_path / "escaped.md").exists()
+    with pytest.raises(ToolError, match="outside the canon"):
+        svc._ensure_contained(tmp_path / "escaped.md")
+
+
+def test_create_rejects_reserved_namespace_chars_despite_loose_pattern(tmp_path: Path):
+    # '.'/':' are reserved for future id namespacing — enforced by the schema,
+    # not the pattern, so a loosened id_pattern cannot re-admit them.
+    (tmp_path / "canonia.yml").write_text(
+        "canon:\n  root: concepts\n  domains: [process]\n"
+        'schema:\n  id_pattern: "^[a-z0-9.:-]+$"\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "concepts" / "process").mkdir(parents=True)
+    svc = CanonService(tmp_path)
+    for bad in ("infra:deploy", "docs.v2"):
+        with pytest.raises(ToolError, match="reserved"):
+            svc.create(id=bad, title="X", domain="process", summary="s")
+    assert list((tmp_path / "concepts" / "process").glob("*.md")) == []
 
 
 def test_writes_leave_no_temp_files(tmp_path: Path):
