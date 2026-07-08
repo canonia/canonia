@@ -129,3 +129,15 @@ def test_build_site_banners_and_archived_handling(tmp_path: Path):
     records = {r["id"]: r for r in json.loads((out / "search.json").read_text(encoding="utf-8"))}
     assert "cicd" not in records                        # tombstone not searchable
     assert records["old"]["status"] == "archived"       # archived still searchable
+
+
+def test_build_site_removes_stale_pages(tmp_path: Path):
+    _canon(tmp_path)
+    out = tmp_path / "sitegen"
+    build_site(tmp_path, out_dir=out)
+    stale = out / "c" / "removed-concept.html"
+    stale.write_text("old page", encoding="utf-8")
+    result = build_site(tmp_path, out_dir=out)
+    assert not stale.exists()                 # dead page deleted on rebuild
+    assert result["stale_removed"] == 1
+    assert (out / "c" / "ci.html").exists()   # live pages regenerated

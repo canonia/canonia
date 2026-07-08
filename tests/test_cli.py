@@ -71,3 +71,21 @@ def test_import_dry_run_still_reports_gate_failures(tmp_path: Path, capsys):
     assert rc == 1
     assert not out.exists() or not list(out.rglob("*.md"))
     assert "dry-run" in capsys.readouterr().out
+
+
+def test_init_domains_strips_whitespace(tmp_path: Path):
+    from canonia.cli import main as cli_main
+    root = tmp_path / "canon"
+    rc = cli_main(["init", str(root), "--domains", "process, lore"])
+    assert rc == 0
+    assert (root / "concepts" / "lore").is_dir()
+    assert not (root / "concepts" / " lore").exists()
+    assert "[process, lore]" in (root / "canonia.yml").read_text(encoding="utf-8")
+
+
+def test_parse_sources_handles_windows_drive_colons():
+    from canonia.cli import _parse_sources
+    repos = _parse_sources(["win=C:\\repo", "unix=../docs:canon", "both=C:\\repo:sub"])
+    assert str(repos["win"].path).endswith("C:\\repo") and repos["win"].prefix == ""
+    assert repos["unix"].prefix == "canon"
+    assert str(repos["both"].path).endswith("C:\\repo") and repos["both"].prefix == "sub"

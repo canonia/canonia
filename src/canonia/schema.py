@@ -22,7 +22,10 @@ from typing import Dict, List, Optional
 
 from canonia import markdown
 
-DEFAULT_ID_PATTERN = r"^[a-z0-9][a-z0-9-]*$"
+# Kebab-case: dash-separated alphanumeric runs — rejects 'foo-' and 'foo--bar'.
+# Validated with fullmatch, so a user-supplied pattern need not be anchored and
+# '$' cannot admit a trailing newline.
+DEFAULT_ID_PATTERN = r"^[a-z0-9]+(?:-[a-z0-9]+)*$"
 DEFAULT_DOMAINS = ("process", "lore", "infra", "ops")
 # Lifecycle states. active/draft/deprecated are live (resolve to themselves);
 # merged is a redirect tombstone (forwards via `redirect`); archived is dropped
@@ -226,7 +229,7 @@ def validate_concept(
 
     if not concept.id:
         issues.append(Issue(who, "id", "missing"))
-    elif not id_re.match(concept.id):
+    elif not id_re.fullmatch(concept.id):
         issues.append(Issue(who, "id", f"'{concept.id}' does not match {id_pattern}"))
 
     if not concept.title:
@@ -259,12 +262,12 @@ def validate_concept(
         )
 
     for ref in concept.references:
-        if not isinstance(ref, str) or not id_re.match(ref):
+        if not isinstance(ref, str) or not id_re.fullmatch(ref):
             issues.append(Issue(who, "references", f"invalid id '{ref}'"))
 
     # Lifecycle pointers: shape only; resolution is a graph-level gate.
     if concept.redirect is not None:
-        if not id_re.match(concept.redirect):
+        if not id_re.fullmatch(concept.redirect):
             issues.append(Issue(who, "redirect", f"invalid id '{concept.redirect}'"))
         elif concept.redirect == concept.id:
             issues.append(Issue(who, "redirect", "concept redirects to itself"))
@@ -274,7 +277,7 @@ def validate_concept(
         issues.append(Issue(who, "status", "'merged' requires a 'redirect' target"))
 
     if concept.superseded_by is not None:
-        if not id_re.match(concept.superseded_by):
+        if not id_re.fullmatch(concept.superseded_by):
             issues.append(Issue(who, "superseded_by", f"invalid id '{concept.superseded_by}'"))
         elif concept.superseded_by == concept.id:
             issues.append(Issue(who, "superseded_by", "concept supersedes itself"))

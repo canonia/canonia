@@ -47,6 +47,7 @@ def build_site(canon_dir=".", out_dir=None, **_ignored) -> dict:
 
     broken = 0
     pages_root = (out / "c").resolve()
+    written = set()
     for concept in graph.concepts.values():
         page, page_broken = _concept_page(concept, graph, config)
         broken += page_broken
@@ -56,6 +57,16 @@ def build_site(canon_dir=".", out_dir=None, **_ignored) -> dict:
         if not target.resolve().is_relative_to(pages_root):
             raise ValueError(f"concept id {concept.id!r} escapes the site directory")
         target.write_text(page, encoding="utf-8")
+        written.add(target.name)
+
+    # A page whose concept was removed/renamed would otherwise live forever
+    # (stale content, dead pages still served). Only *.html directly under
+    # c/ is build output; nothing else is touched.
+    stale = 0
+    for old in pages_root.glob("*.html"):
+        if old.name not in written:
+            old.unlink()
+            stale += 1
 
     (out / "index.html").write_text(_index_page(graph, config), encoding="utf-8")
     (out / "search.json").write_text(_search_index(graph), encoding="utf-8")
@@ -70,6 +81,7 @@ def build_site(canon_dir=".", out_dir=None, **_ignored) -> dict:
         "redirects": sum(1 for c in graph.concepts.values() if c.status == "merged"),
         "archived": sum(1 for c in graph.concepts.values() if c.status == "archived"),
         "broken_links": broken,
+        "stale_removed": stale,
     }
 
 
