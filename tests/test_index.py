@@ -112,6 +112,75 @@ def test_store_build_search_and_incremental(tmp_path):
         assert len(idx) == 1
 
 
+def test_build_retags_domain_move_without_reembedding(tmp_path):
+    # A domain-only move leaves the text (hash) unchanged; the row's domain
+    # drives domain-filtered search, so it must be refreshed in place.
+    config = _canon(tmp_path)
+    mover = _concept("mover", "some stable text")
+    model = FakeModel()
+    with index.EmbeddingIndex(index.index_path_for(config)) as idx:
+        idx.build([mover], model)
+        assert idx.search(model.embed_one("stable text"), domain="process")
+
+        mover.domain = "infra"                      # move; text untouched
+        stats = idx.build([mover], model)
+        assert stats.retagged == 1
+        assert stats.unchanged == 1 and stats.updated == 0  # no re-embedding
+
+        assert idx.search(model.embed_one("stable text"), domain="infra")
+        assert not idx.search(model.embed_one("stable text"), domain="process")
+
+
+def test_build_status_change_is_retagged(tmp_path):
+    config = _canon(tmp_path)
+    c = _concept("keeper", "stable text here")
+    model = FakeModel()
+    with index.EmbeddingIndex(index.index_path_for(config)) as idx:
+        idx.build([c], model)
+        c.status = "deprecated"
+        assert idx.build([c], model).retagged == 1
+        row = idx.conn.execute("SELECT status FROM embeddings WHERE id='keeper'").fetchone()
+        assert row[0] == "deprecated"
+
+
+def test_build_model_change_forces_full_reembed(tmp_path):
+    # Two embedding spaces in one matrix corrupt every similarity — a model
+    # switch must wipe and re-embed, not incrementally mix.
+    config = _canon(tmp_path)
+    concepts = [_concept("a", "alpha text"), _concept("b", "beta text")]
+    model = FakeModel()
+    path = index.index_path_for(config)
+    with index.EmbeddingIndex(path, model_name="old-model") as idx:
+        idx.build(concepts, model)
+        assert idx.stored_model() == "old-model"
+    with index.EmbeddingIndex(path, model_name="new-model") as idx:
+        stats = idx.build(concepts, model)          # same texts, new model
+        assert stats.added == 2 and stats.unchanged == 0   # full re-embed
+        assert idx.stored_model() == "new-model"
+
+
+def test_searcher_degrades_on_model_mismatch(tmp_path, monkeypatch):
+    # An index built with a different model than configured must not be
+    # scored against — the searcher degrades to keyword-only instead.
+    pytest.importorskip("onnxruntime")
+    from canonia.server import CanonService
+
+    config = _canon(tmp_path)
+    c = _concept("alpha-widget", "alpha widgets and things")
+    (tmp_path / "concepts" / "process" / "alpha-widget.md").write_text(
+        c.to_markdown(), encoding="utf-8"
+    )
+    model = FakeModel()
+    with index.EmbeddingIndex(index.index_path_for(config), model_name="some-other-model") as idx:
+        from canonia.graph import Graph
+        idx.build(list(Graph.load(config.concepts_dir).concepts.values()), model)
+
+    monkeypatch.setattr(index.EmbeddingModel, "load", classmethod(lambda cls, *a, **k: model))
+    result = CanonService(tmp_path).search("alpha", limit=5)
+    assert "mode" not in result                     # fell back to keyword-only
+    assert isinstance(result["results"][0]["score"], int)
+
+
 def test_duplicate_pairs(tmp_path):
     config = _canon(tmp_path)
     model = FakeModel()

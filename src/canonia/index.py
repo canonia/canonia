@@ -446,6 +446,9 @@ class BuildStats:
     updated: int
     unchanged: int
     removed: int
+    # Rows whose text (hash) was unchanged but whose domain/status metadata
+    # moved — refreshed in place, no re-embedding.
+    retagged: int = 0
 
 
 class EmbeddingIndex:
@@ -501,12 +504,27 @@ class EmbeddingIndex:
 
         Merged redirect tombstones are not indexed (they carry no real body).
         """
+        prior = self.conn.execute("SELECT value FROM meta WHERE key = 'model'").fetchone()
+        if prior and prior[0] != self.model_name:
+            # The stored vectors came from a different model. Two embedding
+            # spaces in one matrix silently corrupt every similarity, so wipe
+            # and re-embed everything instead of mixing.
+            if log:
+                log(f"model changed ({prior[0]} → {self.model_name}) — re-embedding everything")
+            self.conn.execute("DELETE FROM embeddings")
+
         indexable = [c for c in concepts if c.status != "merged"]
         want = {c.id: concept_text(c) for c in indexable}
         by_id = {c.id: c for c in indexable}
-        have = {row[0]: row[1] for row in self.conn.execute("SELECT id, hash FROM embeddings")}
+        have = {
+            row[0]: (row[1], row[2], row[3])
+            for row in self.conn.execute("SELECT id, hash, domain, status FROM embeddings")
+        }
 
-        to_embed = [cid for cid, text in want.items() if have.get(cid) != _content_hash(text)]
+        to_embed = [
+            cid for cid, text in want.items()
+            if cid not in have or have[cid][0] != _content_hash(text)
+        ]
         unchanged = len(want) - len(to_embed)
         added = sum(1 for cid in to_embed if cid not in have)
         updated = len(to_embed) - added
@@ -525,6 +543,24 @@ class EmbeddingIndex:
                 rows,
             )
 
+        # A domain/status-only change (e.g. `update` relocating a concept to
+        # another domain) leaves the text — and so the hash — untouched, but
+        # the row's metadata drives domain-filtered search: refresh it in
+        # place rather than serving stale filters until the text changes.
+        embedding = set(to_embed)
+        retagged = [
+            (c.domain, c.status, cid)
+            for cid, c in by_id.items()
+            if cid in have and cid not in embedding
+            and (have[cid][1], have[cid][2]) != (c.domain, c.status)
+        ]
+        if retagged:
+            if log:
+                log(f"retagging {len(retagged)} concept(s) (domain/status moved, text unchanged)")
+            self.conn.executemany(
+                "UPDATE embeddings SET domain = ?, status = ? WHERE id = ?", retagged
+            )
+
         stale = [cid for cid in have if cid not in want]
         if stale:
             self.conn.executemany("DELETE FROM embeddings WHERE id = ?", [(c,) for c in stale])
@@ -532,10 +568,15 @@ class EmbeddingIndex:
         self._set_meta("model", self.model_name)
         self._set_meta("dim", str(EMBED_DIM))
         self.conn.commit()
-        return BuildStats(len(want), added, updated, unchanged, len(stale))
+        return BuildStats(len(want), added, updated, unchanged, len(stale), len(retagged))
 
     def _set_meta(self, key: str, value: str) -> None:
         self.conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", (key, value))
+
+    def stored_model(self) -> Optional[str]:
+        """The model name the stored vectors were built with (None if unbuilt)."""
+        row = self.conn.execute("SELECT value FROM meta WHERE key = 'model'").fetchone()
+        return row[0] if row else None
 
     # --- read ---------------------------------------------------------------
 
@@ -750,6 +791,13 @@ class SemanticSearcher:
         if idx is None:
             return {}
         try:
+            stored = idx.stored_model()
+            mine = getattr(self.config, "index_model", DEFAULT_MODEL)
+            if stored is not None and stored != mine:
+                # The index was built with a different model; scoring a query
+                # from `mine` against those vectors compares two embedding
+                # spaces — nonsense numbers. Degrade to keyword until rebuilt.
+                return {}
             qv = model.embed_one(query)
             hits = idx.search(qv, limit=10_000_000, domain=domain)
         except Exception:  # pragma: no cover - defensive
