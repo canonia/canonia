@@ -65,7 +65,10 @@ class CanoniaConfig:
     # 'mkdocs-material' etc. are a reserved backend seam.
     site_generator: str = "builtin"
     # Commit each server write to git automatically (local only — never pushes).
-    autocommit: bool = False
+    # Default ON: git is the canon's only audit trail — without it, MCP writes
+    # are anonymous uncommitted working-tree changes. Degrades to a warning
+    # (never an error) when git or a repo is absent.
+    autocommit: bool = True
     sources: Dict[str, SourceRepo] = field(default_factory=dict)
 
     @property
@@ -122,6 +125,6 @@ class CanoniaConfig:
             index_hybrid_weight=float(index.get("hybrid_weight", 0.5)),
             mcp_name=mcp.get("name", "canonia"),
             site_generator=site.get("generator", "builtin"),
-            autocommit=bool(git.get("autocommit", False)),
+            autocommit=bool(git.get("autocommit", True)),
             sources=sources,
         )

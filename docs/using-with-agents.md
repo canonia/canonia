@@ -191,11 +191,15 @@ Canonia is bidirectional on purpose:
   Writes go straight to the git-backed files, so **the next read in any session or
   repo sees them** — no re-syncing copies across repos.
 
-With `git.autocommit` (in `canonia.yml`, or `serve --autocommit`) each write is
-committed **locally** (never pushed) with a message like `Create concept '<id>'`, so
-you get authorship + history for free. Run `canonia validate` before shipping — it's
-the hard gate that catches any dangling edge the permissive writes allowed. See
-[maintaining](maintaining.md) and [serving](serving.md).
+Autocommit is **on by default**: each write is committed **locally** (never
+pushed) with a message like `Create concept '<id>'`, so you get history for
+free. Run the server with `--identity <name> --identity-kind llm` (or
+`$CANONIA_IDENTITY`) and commits are authored as the agent — and agent-created
+concepts land as **drafts** for human review. Agents should pass `get`'s
+`version` back as `update`'s `expected_version` so concurrent edits fail
+cleanly instead of overwriting each other. Run `canonia validate` before
+shipping — it's the hard gate that catches any dangling edge the permissive
+writes allowed. See [maintaining](maintaining.md) and [serving](serving.md).
 
 ---
 

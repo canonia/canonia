@@ -18,7 +18,10 @@ governance seam (a no-op in v1 — the canon ships open).
 
 from __future__ import annotations
 
+import datetime
+import hashlib
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -34,6 +37,37 @@ from canonia.schema import Concept, validate_concept
 
 PROTOCOL_VERSION = "2025-06-18"
 SERVER_NAME = "canonia"
+
+
+def resolve_identity(name: Optional[str] = None, kind: Optional[str] = None) -> access.Identity:
+    """Build the caller identity from CLI flags, falling back to env vars.
+
+    ``CANONIA_IDENTITY`` / ``CANONIA_IDENTITY_KIND`` fill in whatever the flags
+    don't provide. No name at all ⇒ :data:`access.ANONYMOUS` (v0.1-compatible
+    open behavior). A *named* identity with no explicit kind defaults to
+    ``llm`` — ``canonia serve`` is the agent interface, and mislabeling an
+    agent as human would skip the draft-by-default review gate, while the
+    reverse is merely a visible, correctable draft.
+    """
+    name = (name or os.environ.get("CANONIA_IDENTITY") or "").strip()
+    kind = (kind or os.environ.get("CANONIA_IDENTITY_KIND") or "").strip().lower()
+    if not name:
+        return access.ANONYMOUS
+    if not kind:
+        kind = "llm"
+    if kind not in ("human", "llm"):
+        raise ValueError(f"identity kind must be 'human' or 'llm', got {kind!r}")
+    return access.Identity(name=name, kind=kind)
+
+
+def _file_version(path) -> Optional[str]:
+    """Short content hash of a concept file — the optimistic-concurrency token."""
+    if not path:
+        return None
+    try:
+        return hashlib.sha256(Path(path).read_bytes()).hexdigest()[:12]
+    except OSError:
+        return None
 
 
 class ToolError(Exception):
@@ -92,6 +126,15 @@ class CanonService:
             view["redirect"] = concept.redirect
         if concept.tags:
             view["tags"] = list(concept.tags)
+        if concept.created:
+            view["created"] = str(concept.created)
+        if concept.updated:
+            view["updated"] = str(concept.updated)
+        # Optimistic-concurrency token: pass it back as update's
+        # expected_version to detect a concurrent edit of this concept.
+        version = _file_version(concept.path)
+        if version:
+            view["version"] = version
         if body:
             view["body"] = concept.body.strip("\n")
         return view
@@ -233,9 +276,14 @@ class CanonService:
         references: Optional[List[str]] = None,
         source: Optional[List[dict]] = None,
         body: str = "",
-        status: str = "active",
+        status: Optional[str] = None,
         tags: Optional[List[str]] = None,
     ) -> dict:
+        if status is None:
+            # Agent-authored knowledge lands as a draft for human review;
+            # humans (and an explicit status) publish straight to active.
+            # Drafts are live — searchable and resolvable — just marked.
+            status = "draft" if self.identity.kind == "llm" else "active"
         if not source:
             # Authored directly in the canon — provenance points at itself.
             source = [{"repo": self.config.canon_name,
@@ -245,6 +293,7 @@ class CanonService:
             references=references or [], source=source, status=status,
             tags=tags or [], body=body,
         )
+        concept.created = datetime.date.today()
         self._validate(concept)
         # Ids are globally unique across ALL domains: check graph membership,
         # not just this domain's file path — a same-id file elsewhere would
@@ -266,9 +315,20 @@ class CanonService:
         body: Optional[str] = None,
         append_body: Optional[str] = None,
         source: Optional[List[dict]] = None,
+        expected_version: Optional[str] = None,
     ) -> dict:
         concept = self._load(id, "update")
         old_path = concept.path
+        if expected_version:
+            # Optimistic concurrency: the caller read a version (from get) and
+            # only wants this write applied if nothing changed in between.
+            current = _file_version(old_path)
+            if current != expected_version:
+                raise ToolError(
+                    f"concept '{id}' changed since you read it "
+                    f"(version {current}, you expected {expected_version}) — "
+                    "re-read it and re-apply your change"
+                )
 
         if title is not None:
             concept.title = title
@@ -344,12 +404,12 @@ class CanonService:
                 to_write.append(c)
                 repointed.append(cid)
 
-        # Validate every mutated concept BEFORE writing any of them: a
-        # validation failure (e.g. a legacy source concept that predates the
-        # schema) must not leave a half-merged canon on disk — target rewritten
-        # with absorbed provenance but no tombstone.
+        # Check every mutated concept BEFORE writing any of them: a validation
+        # (or write-access) failure — e.g. a legacy source concept that
+        # predates the schema — must not leave a half-merged canon on disk,
+        # target rewritten with absorbed provenance but no tombstone.
         for c in to_write:
-            self._validate(c)
+            self._precheck_write(c)
         commit_paths = [self._save(c) for c in to_write]
 
         result = self._result(src, commit_paths, f"Merge '{id}' into '{into}'", created=False)
@@ -390,6 +450,8 @@ class CanonService:
                 f"{len(deps)} concept(s) depend on '{id}': {deps}. "
                 f"Deprecate or merge instead, or pass force=true to break them."
             )
+        if not access.can_write(concept, self.identity):
+            raise ToolError(f"identity '{self.identity.name}' may not remove '{concept.id}'")
         path = Path(concept.path) if concept.path else self._path_for(concept)
         self._ensure_contained(path)
         path.unlink(missing_ok=True)
@@ -438,8 +500,23 @@ class CanonService:
         if not path.resolve().is_relative_to(root):
             raise ToolError(f"refusing a path outside the canon: {path.name}")
 
+    def _precheck_write(self, concept: Concept) -> None:
+        """The write gate without the write: access check + validation.
+
+        Multi-concept operations (merge) run this over every concept first so
+        a failure on the Nth concept can't leave the first N-1 written.
+        """
+        if not access.can_write(concept, self.identity):
+            raise ToolError(f"identity '{self.identity.name}' may not write '{concept.id}'")
+        self._validate(concept)
+
     def _save(self, concept: Concept) -> Path:
         """Validate then atomically write one concept to disk; return its path."""
+        if not access.can_write(concept, self.identity):
+            raise ToolError(f"identity '{self.identity.name}' may not write '{concept.id}'")
+        # Provenance stamp: date (not time) so a same-day no-op rewrite stays
+        # byte-identical and autocommit's nothing-to-commit path still applies.
+        concept.updated = datetime.date.today()
         self._validate(concept)
         path = self._path_for(concept)
         self._ensure_contained(path)
@@ -474,6 +551,9 @@ class CanonService:
             "status": concept.status,
             "created": created,
             "committed": False,
+            # Version of what was just written — lets a caller chain a
+            # compare-and-swap update without an extra get.
+            "version": _file_version(self._path_for(concept)),
             "warnings": warnings,
         }
         committed, note = self._maybe_commit(commit_paths, message)
@@ -507,6 +587,9 @@ class CanonService:
             detail = (proc.stderr or proc.stdout or "").strip()
             if "nothing to commit" in detail:
                 return False, None  # no-op change; not an error
+            if "not a git repository" in detail:
+                return False, ("autocommit skipped: the canon is not a git repository "
+                               "(run `git init` for versioned, attributable writes)")
             return False, f"autocommit failed: {detail}"
         return True, None
 
@@ -621,7 +704,8 @@ TOOLS: List[dict] = [
         "title": "Get a concept",
         "description": "Fetch one concept by id: frontmatter, body, and backlinks (referenced_by). "
                        "A merged (redirect) id transparently forwards to its canonical concept "
-                       "unless follow=false.",
+                       "unless follow=false. The returned 'version' token can be passed to "
+                       "update as expected_version to detect concurrent edits.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -636,13 +720,17 @@ TOOLS: List[dict] = [
         "name": "create",
         "title": "Create a concept",
         "description": "Create a new concept file. Fails if the id already exists (use update). "
-                       "Unresolved references are returned as warnings, not errors.",
+                       "Unresolved references are returned as warnings, not errors. "
+                       "When the server runs with an LLM identity, new concepts default to "
+                       "status 'draft' (still searchable/resolvable) pending human review.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "id": _STR, "title": _STR, "domain": _STR, "summary": _STR,
                 "references": _STR_LIST, "source": _SOURCE_LIST,
-                "body": _STR, "status": _STR, "tags": _STR_LIST,
+                "body": _STR,
+                "status": {**_STR, "description": "default: active (draft under an LLM identity)"},
+                "tags": _STR_LIST,
             },
             "required": ["id", "title", "domain", "summary"],
         },
@@ -651,13 +739,17 @@ TOOLS: List[dict] = [
         "name": "update",
         "title": "Update a concept",
         "description": "Update an existing concept. Only the fields you pass change; "
-                       "'append_body' adds a paragraph, 'body' replaces it. Changing 'domain' relocates the file.",
+                       "'append_body' adds a paragraph, 'body' replaces it. Changing 'domain' relocates the file. "
+                       "Pass get's 'version' as expected_version to fail cleanly if someone "
+                       "else changed the concept since you read it.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "id": _STR, "title": _STR, "summary": _STR, "domain": _STR, "status": _STR,
                 "references": _STR_LIST, "tags": _STR_LIST,
                 "body": _STR, "append_body": _STR, "source": _SOURCE_LIST,
+                "expected_version": {**_STR, "description": "Version token from get; the update "
+                                     "is rejected if the concept changed since (optional)."},
             },
             "required": ["id"],
         },
@@ -761,7 +853,9 @@ class StdioServer:
         print(message, file=self._err, flush=True)
 
     def run(self) -> None:
-        self.log(f"canonia MCP server ({__version__}) on stdio — {len(self.service._graph())} concepts")
+        who = self.service.identity
+        tag = "" if who is access.ANONYMOUS else f" as {who.name} ({who.kind})"
+        self.log(f"canonia MCP server ({__version__}) on stdio{tag} — {len(self.service._graph())} concepts")
         for line in self._in:
             line = line.strip()
             if not line:
@@ -861,7 +955,12 @@ def _tool_error(message: str) -> dict:
     return {"content": [{"type": "text", "text": message}], "isError": True}
 
 
-def serve(canon_dir=".", autocommit: Optional[bool] = None, **_ignored) -> None:
+def serve(
+    canon_dir=".",
+    autocommit: Optional[bool] = None,
+    identity: Optional[access.Identity] = None,
+    **_ignored,
+) -> None:
     """Run the MCP server on stdio for the canon at ``canon_dir``."""
-    service = CanonService(Path(canon_dir), autocommit=autocommit)
+    service = CanonService(Path(canon_dir), identity=identity, autocommit=autocommit)
     StdioServer(service).run()

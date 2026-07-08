@@ -264,9 +264,16 @@ def cmd_serve(args) -> int:
     if _load_config(canon) is None:
         print(f"no {CONFIG_FILENAME} at or above {Path(canon).resolve()}", file=sys.stderr)
         return 1
+    # Flags fall back to $CANONIA_IDENTITY / $CANONIA_IDENTITY_KIND; a named
+    # identity with no kind defaults to llm (serve is the agent interface).
+    try:
+        identity = server.resolve_identity(args.identity, args.identity_kind)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
     # --autocommit / --no-autocommit override canonia.yml's git.autocommit.
     try:
-        server.serve(canon, autocommit=args.autocommit)
+        server.serve(canon, autocommit=args.autocommit, identity=identity)
     except KeyboardInterrupt:  # pragma: no cover
         return 0
     return 0
@@ -436,6 +443,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_serve.add_argument(
         "--no-autocommit", dest="autocommit", action="store_false",
         help="disable autocommit even if canonia.yml enables it",
+    )
+    p_serve.add_argument(
+        "--identity", help="who this server writes as (git author; falls back to $CANONIA_IDENTITY)",
+    )
+    p_serve.add_argument(
+        "--identity-kind", dest="identity_kind", choices=["human", "llm"],
+        help="identity kind; a named identity defaults to llm — LLM creates land as drafts",
     )
     p_serve.set_defaults(func=cmd_serve)
 
