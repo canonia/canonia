@@ -41,7 +41,8 @@ def test_render_wikilink_resolution_and_escaping():
 def _canon(tmp_path: Path) -> CanonService:
     (tmp_path / "canonia.yml").write_text(
         "canon:\n  root: concepts\n  name: testcanon\n  domains: [process]\n"
-        'schema:\n  id_pattern: "^[a-z0-9][a-z0-9-]*$"\n',
+        'schema:\n  id_pattern: "^[a-z0-9][a-z0-9-]*$"\n'
+        "git:\n  autocommit: false\n",
         encoding="utf-8",
     )
     (tmp_path / "concepts" / "process").mkdir(parents=True)

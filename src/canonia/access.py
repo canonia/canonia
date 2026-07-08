@@ -44,3 +44,13 @@ def filter_concepts(
 def can_access(concept, identity: Optional[Identity] = None) -> bool:
     """Whether ``identity`` may access ``concept``. NO-OP in v1: always True."""
     return True
+
+
+def can_write(concept, identity: Optional[Identity] = None) -> bool:
+    """Whether ``identity`` may write/delete ``concept``. NO-OP in v1: always True.
+
+    The write-side twin of :func:`can_access`, called on every server write and
+    remove so the governance module can scope write access (per-domain,
+    per-identity — humans AND LLMs) without touching call sites.
+    """
+    return True

@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Tests for the MCP service logic and the JSON-RPC stdio transport."""
 
+import datetime
 import io
 import json
 import subprocess
@@ -9,12 +10,15 @@ from pathlib import Path
 
 import pytest
 
+from canonia import access
 from canonia.graph import Graph
 from canonia.schema import Concept
-from canonia.server import CanonService, StdioServer, ToolError
+from canonia.server import CanonService, StdioServer, ToolError, resolve_identity
 
 
-def _canon(tmp_path: Path, *, canon_name: str = None, autocommit: bool = None) -> Path:
+def _canon(tmp_path: Path, *, canon_name: str = None, autocommit: bool = False) -> Path:
+    """Scaffold a canon. autocommit defaults to False so non-git tests stay
+    quiet; pass autocommit=None to omit the git: block (the real default)."""
     canon_block = "canon:\n  root: concepts\n  domains: [process, infra]\n"
     if canon_name:
         canon_block += f"  name: {canon_name}\n"
@@ -135,10 +139,94 @@ def test_autocommit_commits_each_write(tmp_path: Path):
     assert "Update concept 'ci'" in log
 
 
-def test_autocommit_off_by_default(tmp_path: Path):
-    svc = CanonService(_canon(tmp_path))  # no git block
+def test_autocommit_on_by_default_with_git_repo(tmp_path: Path):
+    _canon(tmp_path, autocommit=None)  # no git: block in canonia.yml
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "Tester"], cwd=tmp_path, check=True)
+    svc = CanonService(tmp_path)
+    res = svc.create(id="a", title="A", domain="process", summary="a")
+    assert res["committed"] is True
+
+
+def test_autocommit_default_warns_without_git_repo(tmp_path: Path):
+    svc = CanonService(_canon(tmp_path, autocommit=None))  # default on, no repo
     res = svc.create(id="a", title="A", domain="process", summary="a")
     assert res["committed"] is False
+    assert any("not a git repository" in w for w in res["warnings"])
+
+
+def test_autocommit_records_identity_as_git_author(tmp_path: Path):
+    _canon(tmp_path, autocommit=True)
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "Tester"], cwd=tmp_path, check=True)
+    svc = CanonService(tmp_path, identity=access.Identity("bot-1", "llm"))
+    res = svc.create(id="k", title="K", domain="process", summary="k", status="active")
+    assert res["committed"] is True
+    author = subprocess.run(["git", "log", "-1", "--format=%an <%ae>"], cwd=tmp_path,
+                            capture_output=True, text=True).stdout.strip()
+    assert author == "bot-1 <llm@canonia>"
+
+
+# --- trust layer: identity, draft-by-default, versions, timestamps -----------
+
+def test_llm_identity_creates_land_as_draft(tmp_path: Path):
+    svc = CanonService(_canon(tmp_path), identity=access.Identity("bot", "llm"))
+    res = svc.create(id="k", title="K", domain="process", summary="k")
+    assert res["status"] == "draft"
+    assert svc.get("k")["status"] == "draft"
+    # drafts are live: searchable and resolvable
+    assert "k" in [r["id"] for r in svc.search("k")["results"]]
+    # an explicit status is honored (operator's call, until governance lands)
+    res2 = svc.create(id="k2", title="K2", domain="process", summary="k", status="active")
+    assert res2["status"] == "active"
+
+
+def test_human_and_anonymous_creates_default_active(tmp_path: Path):
+    svc = CanonService(_canon(tmp_path), identity=access.Identity("andre", "human"))
+    assert svc.create(id="h", title="H", domain="process", summary="h")["status"] == "active"
+    anon = CanonService(tmp_path)  # v0.1-compatible open behavior
+    assert anon.create(id="n", title="N", domain="process", summary="n")["status"] == "active"
+
+
+def test_update_expected_version_detects_concurrent_edit(tmp_path: Path):
+    svc = CanonService(_canon(tmp_path))
+    v1 = svc.create(id="k", title="K", domain="process", summary="k")["version"]
+    assert svc.get("k")["version"] == v1
+
+    svc.update("k", summary="edited by someone else")   # concurrent edit
+    with pytest.raises(ToolError, match="changed since"):
+        svc.update("k", summary="mine", expected_version=v1)
+
+    v2 = svc.get("k")["version"]
+    res = svc.update("k", summary="mine", expected_version=v2)
+    assert res["ok"] and res["version"] != v2
+    assert svc.get("k")["summary"] == "mine"
+
+
+def test_server_writes_stamp_created_and_updated(tmp_path: Path):
+    svc = CanonService(_canon(tmp_path))
+    svc.create(id="k", title="K", domain="process", summary="k")
+    today = datetime.date.today().isoformat()
+    got = svc.get("k")
+    assert got["created"] == today and got["updated"] == today
+    raw = (tmp_path / "concepts" / "process" / "k.md").read_text(encoding="utf-8")
+    assert f"created: {today}" in raw and f"updated: {today}" in raw
+
+
+def test_resolve_identity_flags_env_and_default_kind(monkeypatch):
+    monkeypatch.delenv("CANONIA_IDENTITY", raising=False)
+    monkeypatch.delenv("CANONIA_IDENTITY_KIND", raising=False)
+    assert resolve_identity() is access.ANONYMOUS
+    assert resolve_identity("bot-1").kind == "llm"        # named ⇒ llm unless said
+    assert resolve_identity("a", "human").kind == "human"
+    monkeypatch.setenv("CANONIA_IDENTITY", "env-bot")
+    assert resolve_identity().name == "env-bot"
+    monkeypatch.setenv("CANONIA_IDENTITY_KIND", "human")
+    assert resolve_identity().kind == "human"
+    with pytest.raises(ValueError):
+        resolve_identity("x", "robot")
 
 
 def test_update_domain_change_relocates_file(tmp_path: Path):
