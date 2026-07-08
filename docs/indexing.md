@@ -75,19 +75,33 @@ index:
   backend: sqlite         # see "backends" below
 ```
 
-The server reads the index as of the last **build**; concepts written via MCP are
-found by keyword immediately but only join semantic results after the next
-`canonia index build`. Rebuilds are cheap: only concepts whose text changed are
+The server keeps the index fresh as it writes (**embed-on-write**): once an
+index has been built and the semantic extra is installed, every MCP write
+syncs the written concept in place — a text change re-embeds it, a
+domain/status-only move retags the stored row without re-embedding, and merge
+tombstones / hard removes drop the vector. Writes never fail on index trouble:
+the concept file is the source of truth and the index is derived, so any
+degradation (model not cached on this machine, index built with a different
+`index.model`, sqlite hiccup) surfaces as a `warnings` entry on the write
+result pointing back at `canonia index build`. The server never downloads the
+model at serve time, and `index.semantic: false` disables embed-on-write along
+with hybrid search.
+
+`canonia index build` remains the bulk path: the first build, model changes,
+and catching up after edits made *outside* the server (humans editing files,
+git pulls). Rebuilds are cheap: only concepts whose text changed are
 re-embedded; a domain/status-only change (e.g. a concept relocated to another
 domain) just retags the stored row in place. Changing `index.model` wipes and
 re-embeds the whole index on the next build (two embedding spaces must never
-mix), and until that rebuild happens the server refuses to score queries
-against the old vectors — search degrades to keyword-only. A concept with no vector yet is scored on keywords alone
+mix), and until that rebuild happens the server refuses to score queries — or
+embed writes — against the old vectors; search degrades to keyword-only. A
+concept with no vector yet is scored on keywords alone
 (it is **not** blended with a zero semantic score, which would systematically
 down-rank the newest knowledge), its result row carries no `semantic` field, and
 the response reports how many matched concepts the index hasn't caught up with:
-`"unindexed": N` — a nonzero value means it's time to re-run
-`canonia index build`.
+`"unindexed": N` — a nonzero value means the index predates those concepts
+(edits made outside the server, or writes made while the index was degraded);
+re-run `canonia index build`.
 
 ## Backends
 
