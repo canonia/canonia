@@ -14,7 +14,7 @@ versioning + authorship.
 **Status: pre-alpha, v0.1 feature-complete.** Identity reserved (GitHub org
 `canonia`, npm + PyPI `canonia`, Apache-2.0). **schema + graph gates + importer +
 MCP server + static site + semantic index + docs guide are functional** (`canonia
-import` / `validate` / `index` / `serve` / `build`, curated + zero-config, 121 tests
+import` / `validate` / `index` / `serve` / `build`, curated + zero-config, 127 tests
 passing); access.py a no-op seam (reads + writes). MCP tools: search / get / create / update /
 list_domains + lifecycle (deprecate / merge / archive / restore / remove). MCP
 transport and the site are dependency-free stdlib impls (no `mcp` SDK — needs Python

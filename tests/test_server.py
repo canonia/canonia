@@ -114,6 +114,55 @@ def test_create_rejects_reserved_namespace_chars_despite_loose_pattern(tmp_path:
     assert list((tmp_path / "concepts" / "process").glob("*.md")) == []
 
 
+def test_create_race_loser_does_not_clobber_winner(tmp_path: Path, monkeypatch):
+    # The TOCTOU window: another session lands the same id between create's
+    # exists() check and its write. The exclusive write must lose loudly —
+    # never silently overwrite the winner's file.
+    svc = CanonService(_canon(tmp_path))
+    target = tmp_path / "concepts" / "process" / "raced.md"
+    real = svc._ensure_contained
+
+    def interleave(path):
+        real(path)
+        if not target.exists():
+            target.write_text("the winner's bytes", encoding="utf-8")
+
+    monkeypatch.setattr(svc, "_ensure_contained", interleave)
+    with pytest.raises(ToolError, match="already exists"):
+        svc.create(id="raced", title="Loser", domain="process", summary="s")
+    assert target.read_text(encoding="utf-8") == "the winner's bytes"
+    assert list(tmp_path.rglob("*.tmp")) == []
+
+
+def test_concurrent_creates_of_same_id_have_one_winner(tmp_path: Path):
+    # Hammer one id from many threads: exactly one create may succeed, and the
+    # file must be the winner's intact write (no mixed bytes, no stray temps).
+    import threading
+
+    svc = CanonService(_canon(tmp_path))
+    winners: list = []
+    barrier = threading.Barrier(8)
+
+    def attempt(n: int) -> None:
+        barrier.wait()
+        try:
+            svc.create(id="raced", title=f"Winner {n}", domain="process", summary=f"s{n}")
+            winners.append(n)
+        except ToolError:
+            pass
+
+    threads = [threading.Thread(target=attempt, args=(i,)) for i in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert len(winners) == 1
+    written = Concept.load(tmp_path / "concepts" / "process" / "raced.md")
+    assert written.title == f"Winner {winners[0]}"
+    assert list(tmp_path.rglob("*.tmp")) == []
+
+
 def test_failed_update_leaves_no_phantom_state(tmp_path: Path):
     # update mutates the loaded concept *before* validating; when validation
     # rejects the write, the mutation must be invisible to later reads (the
@@ -150,6 +199,76 @@ def test_create_provenance_defaults_to_canon(tmp_path: Path):
     svc = CanonService(_canon(tmp_path))
     svc.create(id="a", title="A", domain="process", summary="a")
     assert svc.get("a")["source"][0]["repo"] == "canon"
+
+
+def test_autocommit_retries_past_transient_index_lock(tmp_path: Path, monkeypatch):
+    # Two sessions committing at once collide on .git/index.lock; the loser
+    # must retry past the transient lock instead of dropping the audit trail.
+    _canon(tmp_path, autocommit=True)
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "Tester"], cwd=tmp_path, check=True)
+
+    monkeypatch.setattr(CanonService, "_LOCK_DELAY", 0.001)
+    svc = CanonService(tmp_path)
+    real = svc._run_git
+    locked = {"left": 2}
+
+    def flaky(args, cwd):
+        if args[0] == "commit" and locked["left"]:
+            locked["left"] -= 1
+            return subprocess.CompletedProcess(
+                args, 128, stdout="",
+                stderr="fatal: Unable to create '.git/index.lock': File exists.",
+            )
+        return real(args, cwd)
+
+    monkeypatch.setattr(svc, "_run_git", flaky)
+    res = svc.create(id="ci", title="CI", domain="process", summary="c")
+    assert res["committed"] is True
+    assert locked["left"] == 0                      # both lock hits were retried
+    assert res["warnings"] == []
+
+
+def test_autocommit_reports_a_lock_it_cannot_outwait(tmp_path: Path, monkeypatch):
+    # A lock that never clears (crashed process left index.lock behind) must
+    # surface as a warning after the retries — never fail the write itself.
+    _canon(tmp_path, autocommit=True)
+    monkeypatch.setattr(CanonService, "_LOCK_DELAY", 0.0)
+    svc = CanonService(tmp_path)
+
+    def always_locked(args, cwd):
+        return subprocess.CompletedProcess(
+            args, 128, stdout="",
+            stderr="fatal: Unable to create '.git/index.lock': File exists.",
+        )
+
+    monkeypatch.setattr(svc, "_run_git", always_locked)
+    res = svc.create(id="ci", title="CI", domain="process", summary="c")
+    assert res["ok"] and res["committed"] is False
+    assert any("index.lock" in w for w in res["warnings"])
+    assert (tmp_path / "concepts" / "process" / "ci.md").exists()
+
+
+def test_autocommit_never_sweeps_foreign_staged_files(tmp_path: Path):
+    # Sessions share .git/index: another session's staged-but-uncommitted file
+    # must not be folded into this write's commit (its write would land under
+    # our message and author, and its own commit would find nothing staged).
+    _canon(tmp_path, autocommit=True)
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "Tester"], cwd=tmp_path, check=True)
+    foreign = tmp_path / "concepts" / "process" / "foreign.md"
+    foreign.write_text("another session's in-flight write", encoding="utf-8")
+    subprocess.run(["git", "add", "concepts/process/foreign.md"], cwd=tmp_path, check=True)
+
+    svc = CanonService(tmp_path)
+    res = svc.create(id="mine", title="Mine", domain="process", summary="m")
+    assert res["committed"] is True
+    show = subprocess.run(["git", "show", "--name-only", "--format="],
+                          cwd=tmp_path, capture_output=True, text=True, check=True)
+    committed = [line for line in show.stdout.splitlines() if line.strip()]
+    assert committed == ["concepts/process/mine.md"]
 
 
 def test_autocommit_commits_each_write(tmp_path: Path):

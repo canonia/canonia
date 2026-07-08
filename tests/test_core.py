@@ -4,6 +4,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from canonia import markdown
 from canonia.graph import Graph
 from canonia.schema import Concept, validate_concept
@@ -191,6 +193,19 @@ def test_reserved_namespace_chars_rejected_despite_loose_pattern():
     c.id = "still/odd-but-allowed"
     issues = validate_concept(c, domains=["infra"], id_pattern=loose)
     assert not any(i.field == "id" for i in issues)
+
+
+def test_concept_save_exclusive_refuses_existing(tmp_path: Path):
+    c = _good()
+    dst = tmp_path / "x.md"
+    c.save(dst, exclusive=True)              # nothing there yet: lands
+    c.title = "Changed"
+    with pytest.raises(FileExistsError):
+        c.save(dst, exclusive=True)          # already there: loses loudly
+    assert "Changed" not in dst.read_text(encoding="utf-8")
+    c.save(dst)                              # non-exclusive still replaces
+    assert "Changed" in dst.read_text(encoding="utf-8")
+    assert list(tmp_path.glob("*.tmp")) == []
 
 
 def test_graph_load_skips_reparse_of_unchanged_files(tmp_path: Path, monkeypatch):

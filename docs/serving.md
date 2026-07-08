@@ -58,7 +58,10 @@ with broken edges. See [maintaining](maintaining.md).
 committed **locally** (it **never pushes**) with a message like `Create concept
 '<id>'`. In a canon that isn't a git repo, writes still succeed and carry a
 warning (`git init` to get history). Disable with `git.autocommit: false` or
-`serve --no-autocommit`. Concepts authored here get their provenance `repo`
+`serve --no-autocommit`. Concurrent sessions are safe: each commit contains
+exactly its own write (never a parallel session's staged files), and transient
+`index.lock` collisions are retried; a lock that never clears surfaces as a
+warning on the result — the write itself always lands. Concepts authored here get their provenance `repo`
 from `canon.name` (default `canon`).
 
 **Identity.** Tell the server who it writes as:

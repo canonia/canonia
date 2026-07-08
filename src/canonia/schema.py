@@ -14,6 +14,7 @@ whole-graph property and lives in :mod:`canonia.graph`.
 
 from __future__ import annotations
 
+import itertools
 import os
 import re
 from dataclasses import dataclass, field
@@ -54,6 +55,12 @@ _EMIT_ORDER = [
 
 class ValidationError(Exception):
     """Raised when one or more concepts violate the schema (message lists all)."""
+
+
+# Per-call-unique temp names: two threads saving the same path (e.g. two
+# racing `create`s in one server) must never share a temp file, or the loser's
+# bytes could land under the winner's name. next() on a count is atomic.
+_SAVE_SEQ = itertools.count()
 
 
 @dataclass
@@ -172,24 +179,40 @@ class Concept:
         body = self.body.rstrip("\n")
         return markdown.dump_frontmatter(self.frontmatter()) + "\n" + body + "\n"
 
-    def save(self, path: Path) -> None:
+    def save(self, path: Path, *, exclusive: bool = False) -> None:
         """Atomically write this concept to ``path`` (temp file + rename).
 
         A crash mid-write can never leave a truncated concept file, and the
         temp name starts with a dot so a concurrent :meth:`Graph.load` (which
         skips dotfiles) never picks up a half-written concept.
+
+        With ``exclusive=True`` the write lands only if ``path`` does not
+        already exist — atomically, via hard link, so there is no window
+        between check and write — and raises :class:`FileExistsError`
+        otherwise. This is the guard that keeps two racing creates of the same
+        id from silently clobbering each other. On filesystems without hard
+        links it degrades to the plain replace, leaving the caller's
+        pre-flight exists() check as the only (racy) guard.
         """
         path = Path(path)
-        tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        tmp = path.with_name(f".{path.name}.{os.getpid()}.{next(_SAVE_SEQ)}.tmp")
         try:
             tmp.write_text(self.to_markdown(), encoding="utf-8")
-            os.replace(tmp, path)
-        except BaseException:
+            if not exclusive:
+                os.replace(tmp, path)
+            else:
+                try:
+                    os.link(tmp, path)
+                except FileExistsError:
+                    raise
+                except OSError:
+                    os.replace(tmp, path)
+        finally:
+            # replace() consumed the temp (unlink is a no-op); link() did not.
             try:
                 tmp.unlink()
             except OSError:
                 pass
-            raise
 
     # --- graph helpers ------------------------------------------------------
 
