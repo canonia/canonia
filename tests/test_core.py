@@ -157,6 +157,42 @@ def test_default_id_pattern_rejects_malformed_kebab():
     assert validate_concept(_good(), domains=["infra"]) == []  # kebab still fine
 
 
+def test_reserved_namespace_chars_rejected_despite_loose_pattern():
+    # '.'/':' are reserved for future id namespacing. A loosened
+    # schema.id_pattern must not be able to mint them into any id position —
+    # ids land in filenames/URLs/sqlite PKs, so a retrofit is a migration.
+    loose = r"^[a-z0-9.:/-]+$"
+
+    for bad in ("docs.v2", "infra:deploy", "a.b:c"):
+        c = _good()
+        c.id = bad
+        issues = validate_concept(c, domains=["infra"], id_pattern=loose)
+        assert any(i.field == "id" and "reserved" in i.message for i in issues), bad
+
+    c = _good()
+    c.references = ["infra:deploy"]
+    issues = validate_concept(c, domains=["infra"], id_pattern=loose)
+    assert any(i.field == "references" and "reserved" in i.message for i in issues)
+
+    c = _good()
+    c.status = "merged"
+    c.redirect = "docs.v2"
+    issues = validate_concept(c, domains=["infra"], id_pattern=loose)
+    assert any(i.field == "redirect" and "reserved" in i.message for i in issues)
+
+    c = _good()
+    c.status = "deprecated"
+    c.superseded_by = "a.b"
+    issues = validate_concept(c, domains=["infra"], id_pattern=loose)
+    assert any(i.field == "superseded_by" and "reserved" in i.message for i in issues)
+
+    # Ids the loose pattern admits WITHOUT reserved chars still pass.
+    c = _good()
+    c.id = "still/odd-but-allowed"
+    issues = validate_concept(c, domains=["infra"], id_pattern=loose)
+    assert not any(i.field == "id" for i in issues)
+
+
 def test_graph_load_skips_hidden_directories(tmp_path: Path):
     root = tmp_path / "concepts"
     ok = Concept(id="ok", title="Ok", domain="process", summary="s",
