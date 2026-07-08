@@ -114,6 +114,18 @@ def test_create_rejects_reserved_namespace_chars_despite_loose_pattern(tmp_path:
     assert list((tmp_path / "concepts" / "process").glob("*.md")) == []
 
 
+def test_failed_update_leaves_no_phantom_state(tmp_path: Path):
+    # update mutates the loaded concept *before* validating; when validation
+    # rejects the write, the mutation must be invisible to later reads (the
+    # parse cache hands out fresh Concepts, never the mutated object).
+    svc = CanonService(_canon(tmp_path))
+    with pytest.raises(ToolError):
+        svc.update("testing", title="Phantom", domain="nonsense")
+    got = svc.get("testing")
+    assert got["title"] == "Testing"
+    assert got["domain"] == "process"
+
+
 def test_writes_leave_no_temp_files(tmp_path: Path):
     svc = CanonService(_canon(tmp_path))
     svc.create(id="a", title="A", domain="process", summary="a")

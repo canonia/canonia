@@ -193,6 +193,60 @@ def test_reserved_namespace_chars_rejected_despite_loose_pattern():
     assert not any(i.field == "id" for i in issues)
 
 
+def test_graph_load_skips_reparse_of_unchanged_files(tmp_path: Path, monkeypatch):
+    root = tmp_path / "concepts" / "process"
+    root.mkdir(parents=True)
+    (root / "a.md").write_text(_process_concept("a", []), encoding="utf-8")
+    (root / "b.md").write_text(_process_concept("b", []), encoding="utf-8")
+
+    from canonia import markdown
+    calls = []
+    real = markdown.split_frontmatter
+    monkeypatch.setattr(
+        markdown, "split_frontmatter", lambda text: (calls.append(1), real(text))[1]
+    )
+
+    assert set(Graph.load(tmp_path / "concepts").concepts) == {"a", "b"}
+    parsed_cold = len(calls)
+    assert parsed_cold == 2
+    assert set(Graph.load(tmp_path / "concepts").concepts) == {"a", "b"}
+    assert len(calls) == parsed_cold  # warm load: stat only, no re-parse
+
+
+def test_graph_load_cache_sees_changes_and_deletions(tmp_path: Path):
+    root = tmp_path / "concepts" / "process"
+    root.mkdir(parents=True)
+    (root / "a.md").write_text(_process_concept("a", []), encoding="utf-8")
+    (root / "b.md").write_text(_process_concept("b", []), encoding="utf-8")
+    g = Graph.load(tmp_path / "concepts")
+    assert g.concepts["a"].title == "A"
+
+    changed = _process_concept("a", []).replace("title: A", "title: A but newer")
+    (root / "a.md").write_text(changed, encoding="utf-8")
+    (root / "b.md").unlink()
+    g = Graph.load(tmp_path / "concepts")
+    assert g.concepts["a"].title == "A but newer"
+    assert "b" not in g.concepts
+
+    # The deleted file's cache entry is pruned, not retained forever.
+    from canonia.graph import _parse_cache
+    assert root / "b.md" not in _parse_cache
+
+
+def test_graph_load_hands_out_fresh_objects(tmp_path: Path):
+    # Server tools mutate loaded Concepts and validate afterwards — a rejected
+    # mutation must never leak into the next load via a cached object.
+    root = tmp_path / "concepts" / "process"
+    root.mkdir(parents=True)
+    (root / "a.md").write_text(_process_concept("a", []), encoding="utf-8")
+    g = Graph.load(tmp_path / "concepts")
+    g.concepts["a"].title = "mutated in memory"
+    g.concepts["a"].references.append("ghost")
+    g = Graph.load(tmp_path / "concepts")
+    assert g.concepts["a"].title == "A"
+    assert g.concepts["a"].references == []
+
+
 def test_graph_load_skips_hidden_directories(tmp_path: Path):
     root = tmp_path / "concepts"
     ok = Concept(id="ok", title="Ok", domain="process", summary="s",
