@@ -17,8 +17,9 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
+from canonia import markdown
 from canonia.schema import (
     DEFAULT_DOMAINS,
     DEFAULT_ID_PATTERN,
@@ -26,6 +27,32 @@ from canonia.schema import (
     Issue,
     validate_concept,
 )
+
+# Parse cache: path -> (stat signature, parsed frontmatter, body). Loading a
+# canon is the read path's chokepoint (the MCP server rebuilds the Graph on
+# every tool call) and YAML parsing dominates its cost, so unchanged files
+# skip straight to Concept construction. The signature (mtime_ns, size, inode)
+# invalidates on any write: Concept.save replaces atomically (fresh inode) and
+# external edits move the mtime. Only parsed *data* is cached, never Concept
+# objects — server tools mutate loaded Concepts and validate afterwards, so a
+# rejected mutation must never be visible to the next load; every load hands
+# out freshly-built Concepts.
+_parse_cache: Dict[Path, Tuple[Tuple[int, int, int], dict, str]] = {}
+
+
+def _load_concept(path: Path) -> Concept:
+    try:
+        st = path.stat()
+    except OSError:
+        return Concept.load(path)  # surface the real read error
+    sig = (st.st_mtime_ns, st.st_size, st.st_ino)
+    cached = _parse_cache.get(path)
+    if cached is not None and cached[0] == sig:
+        _, meta, body = cached
+    else:
+        meta, body = markdown.split_frontmatter(path.read_text(encoding="utf-8"))
+        _parse_cache[path] = (sig, meta, body)
+    return Concept.from_frontmatter(meta, body, path=path)
 
 
 @dataclass
@@ -43,16 +70,23 @@ class Graph:
     def load(cls, concepts_root: Path) -> Graph:
         concepts_root = Path(concepts_root)
         graph = cls()
+        seen: set = set()
         for path in sorted(concepts_root.rglob("*.md")):
             # Skip hidden files AND files under hidden directories (.git,
             # .canonia, editor scratch dirs) — they are not canon content.
             if any(part.startswith(".") for part in path.relative_to(concepts_root).parts):
                 continue
-            concept = Concept.load(path)
+            seen.add(path)
+            concept = _load_concept(path)
             if concept.id and concept.id not in graph.concepts:
                 graph.concepts[concept.id] = concept
             else:
                 graph.duplicates.append(concept)
+        # Drop cache entries for files this root no longer has (remove/prune/
+        # external deletes) so a long-running server's cache tracks the canon,
+        # not its history.
+        for stale in [p for p in _parse_cache if p not in seen and p.is_relative_to(concepts_root)]:
+            del _parse_cache[stale]
         return graph
 
     def add(self, concept: Concept) -> None:
