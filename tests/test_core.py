@@ -42,6 +42,8 @@ def test_extract_section_stops_at_same_level_heading():
 def test_inline_refs_and_link_rewrite():
     body = "See [[foo]] and [Bar](bar.md) and [Ext](https://x)."
     assert markdown.extract_inline_refs(body) == ["foo"]
+    fenced = "See [[real]].\n\n```md\nlink: [[not-a-ref]]\n```\n\n~~~\n[[also-not]]\n~~~\n"
+    assert markdown.extract_inline_refs(fenced) == ["real"]  # fences skipped
     rewritten = markdown.rewrite_links(
         body, lambda t: "bar" if t == "bar.md" else None
     )
