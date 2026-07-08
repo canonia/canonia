@@ -359,7 +359,7 @@ class CanonService:
         commit_paths, moved_from = self._relocate(concept, old_path)
         result = self._result(concept, commit_paths, f"Update concept '{id}'", created=False)
         if moved_from is not None:
-            result["moved_from"] = str(moved_from)
+            result["moved_from"] = self._display_path(moved_from)
         return result
 
     # --- tools (lifecycle) --------------------------------------------------
@@ -479,7 +479,7 @@ class CanonService:
         return {
             "ok": True,
             "id": id,
-            "removed": str(path),
+            "removed": self._display_path(path),
             "dependents_broken": deps if (deps and force) else [],
             "committed": committed,
             "warnings": warnings,
@@ -489,6 +489,14 @@ class CanonService:
 
     def _path_for(self, concept: Concept) -> Path:
         return self.config.concepts_dir / concept.domain / f"{concept.id}.md"
+
+    def _display_path(self, path) -> str:
+        """Canon-relative path for tool results — absolute host paths (user
+        name, machine layout) must not leak to MCP clients."""
+        try:
+            return Path(path).resolve().relative_to(self.config.root_dir.resolve()).as_posix()
+        except ValueError:
+            return Path(path).name
 
     def _load(self, id: str, verb: str) -> Concept:
         concept = self._graph().concepts.get(id)
@@ -564,7 +572,7 @@ class CanonService:
         result = {
             "ok": True,
             "id": concept.id,
-            "path": str(self._path_for(concept)),
+            "path": self._display_path(self._path_for(concept)),
             "status": concept.status,
             "created": created,
             "committed": False,
@@ -899,6 +907,11 @@ INTERNAL_ERROR = -32603
 class StdioServer:
     """Speaks the MCP stdio transport for one :class:`CanonService`."""
 
+    # One JSON-RPC message per line; a line beyond this is rejected without
+    # ever being buffered whole — a runaway or hostile client must not be
+    # able to balloon the server's memory with a single message.
+    MAX_MESSAGE_CHARS = 8 * 1024 * 1024
+
     def __init__(self, service: CanonService, stdin=None, stdout=None, stderr=None):
         self.service = service
         self._in = stdin or sys.stdin
@@ -912,11 +925,26 @@ class StdioServer:
         who = self.service.identity
         tag = "" if who is access.ANONYMOUS else f" as {who.name} ({who.kind})"
         self.log(f"canonia MCP server ({__version__}) on stdio{tag} — {len(self.service._graph())} concepts")
-        for line in self._in:
+        while True:
+            line = self._in.readline(self.MAX_MESSAGE_CHARS + 1)
+            if not line:
+                break
+            if len(line) > self.MAX_MESSAGE_CHARS:
+                if not line.endswith("\n"):
+                    self._drain_line()
+                self._send_error(None, INVALID_REQUEST, "message exceeds size limit")
+                continue
             line = line.strip()
             if not line:
                 continue
             self._handle_line(line)
+
+    def _drain_line(self) -> None:
+        """Discard the remainder of an oversized line in bounded chunks."""
+        while True:
+            chunk = self._in.readline(self.MAX_MESSAGE_CHARS)
+            if not chunk or chunk.endswith("\n"):
+                return
 
     def _handle_line(self, line: str) -> None:
         try:
