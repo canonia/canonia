@@ -36,6 +36,18 @@ def test_render_wikilink_resolution_and_escaping():
     assert "&lt;script&gt;" in html          # escaped, not executable
 
 
+def test_render_ampersands_escape_exactly_once():
+    html = render_markdown("[AT&T](https://x.example/?a=1&b=2)")
+    assert '<a href="https://x.example/?a=1&amp;b=2" rel="noopener">AT&amp;T</a>' in html
+
+    def resolver(token):
+        return ("foo.html", "Foo & Bar", True) if token == "foo" else None
+    html = render_markdown("[[foo]] and [[foo|A&B]] and [[missing|X&Y]]", resolver)
+    assert ">Foo &amp; Bar</a>" in html                 # resolver title escaped once
+    assert ">A&amp;B</a>" in html                       # alias not re-escaped
+    assert '<span class="broken">X&amp;Y</span>' in html
+
+
 # --- site build -------------------------------------------------------------
 
 def _canon(tmp_path: Path) -> CanonService:

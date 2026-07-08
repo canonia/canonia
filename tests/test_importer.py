@@ -211,3 +211,29 @@ def test_zeroconfig_infers_id_title_and_references(tmp_path: Path):
     assert by_id["alpha-one"].summary.startswith("First para")
     assert by_id["alpha-one"].references == ["beta"]  # link auto-extracted
     assert "[[beta]]" in by_id["alpha-one"].body
+
+
+def test_zeroconfig_disambiguates_colliding_slugs(tmp_path: Path):
+    folder = tmp_path / "docs"
+    _write(folder / "setup.md", "# Setup\n\nRoot setup. See [Sub](sub/setup.md).\n")
+    _write(folder / "sub" / "setup.md", "# Sub Setup\n\nNested setup.\n")
+    plan = import_zeroconfig(folder, domain="process", repo="docs")
+    by_id = {e.concept.id: e for e in plan.emitted}
+
+    assert set(by_id) == {"setup", "sub-setup"}      # no silent shadowing
+    assert by_id["setup"].warnings == []             # root file keeps the bare slug
+    assert any("disambiguated to 'sub-setup'" in w for w in by_id["sub-setup"].warnings)
+    # Links target the final id, and the dry-run report surfaces the rename.
+    assert by_id["setup"].concept.references == ["sub-setup"]
+    assert "disambiguated" in plan.render_report()
+
+
+def test_zeroconfig_suffixes_when_path_ids_still_collide(tmp_path: Path):
+    folder = tmp_path / "docs"
+    _write(folder / "sub-setup.md", "# Dashed\n\nDashed file.\n")
+    _write(folder / "setup.md", "# Root\n\nRoot file.\n")
+    _write(folder / "sub" / "setup.md", "# Nested\n\nNested file.\n")
+    plan = import_zeroconfig(folder, domain="process", repo="docs")
+    ids = sorted(e.concept.id for e in plan.emitted)
+    # sub/setup.md's path-derived id clashes with sub-setup.md -> numeric suffix.
+    assert ids == ["setup", "sub-setup", "sub-setup-2"]

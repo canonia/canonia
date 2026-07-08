@@ -20,6 +20,11 @@ the first H1 (or a humanised slug), `summary` from existing frontmatter or the f
 paragraph, `references` auto-extracted from `[[id]]` and links to sibling `.md`
 files.
 
+When two files' stems slugify to the same id (`setup.md` and `sub/setup.md`),
+the colliding files get path-derived ids instead (`setup`, `sub-setup`) — links
+follow the final ids, and each rename shows up as a warning in the dry-run plan
+so you can rename the source files if you'd rather pick the ids yourself.
+
 ```bash
 canonia import --zero-config ./some-docs --domain process            # dry-run: shows the plan
 canonia import --zero-config ./some-docs --domain process --commit   # write the files
