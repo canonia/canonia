@@ -53,6 +53,24 @@ def _graph_from_plan(plan: ImportPlan) -> Graph:
     return graph
 
 
+def _overlay_existing(graph: Graph, plan: ImportPlan, out_dir: Path) -> None:
+    """Add the on-disk concepts this import will NOT overwrite (gate context).
+
+    Without ``--prune`` the post-commit canon is the emitted set overlaid on
+    what's already on disk, so the gate must see both: a reference to an
+    existing concept is not dangling, and an emitted id that clashes with an
+    existing concept at a *different* path is a genuine post-commit duplicate.
+    """
+    if not out_dir.exists():
+        return
+    targets = {(out_dir / e.rel_path).resolve() for e in plan.emitted}
+    existing = Graph.load(out_dir)
+    for concept in list(existing.concepts.values()) + list(existing.duplicates):
+        if concept.path is not None and Path(concept.path).resolve() in targets:
+            continue  # this import overwrites that file
+        graph.add(concept)
+
+
 def _print_issues(issues: List[Issue]) -> None:
     for issue in issues:
         print(f"  ✗ {issue}", file=sys.stderr)
@@ -124,14 +142,22 @@ def cmd_import(args) -> int:
     # on the emitted graph — is an accurate prediction of the final on-disk state.
     pruned = plan.reconcile(out_dir) if getattr(args, "prune", False) else None
 
-    # Always show what would happen, then gate-check the emitted graph in memory.
+    # Gate-check the *predicted post-commit canon*: with --prune that is
+    # exactly the emitted set (everything else is removed); without it, the
+    # emitted set overlaid on what's already on disk.
     graph = _graph_from_plan(plan)
+    if pruned is None:
+        _overlay_existing(graph, plan, out_dir)
     if id_pattern:
         issues = graph.validate(domains=domains, id_pattern=id_pattern)
     else:
         issues = graph.validate(domains=domains)
 
-    if args.commit:
+    # A failing gate blocks --commit: never write a canon that would fail its
+    # own gates. --force overrides (writes anyway; the exit code stays 1).
+    blocked = bool(args.commit and issues and not args.force)
+
+    if args.commit and not blocked:
         written = plan.write(out_dir)
         removed = plan.apply_prune(pruned) if pruned else []
         print(plan.render_report(committed=True, pruned=pruned))
@@ -140,8 +166,14 @@ def cmd_import(args) -> int:
             print(f"Pruned {len(removed)} files no longer produced by the sources")
     else:
         print(plan.render_report(committed=False, pruned=pruned))
-        note = "" if not pruned else f" ({len(pruned)} would be pruned)"
-        print(f"\n(dry-run — no files written; re-run with --commit to write to {out_dir}){note}")
+        if blocked:
+            print(
+                f"\n(gates failed — NOTHING was written to {out_dir}; "
+                "fix the reported issues or re-run with --force)"
+            )
+        else:
+            note = "" if not pruned else f" ({len(pruned)} would be pruned)"
+            print(f"\n(dry-run — no files written; re-run with --commit to write to {out_dir}){note}")
 
     if getattr(args, "check_dupes", False):
         _report_dupes(plan, config, out_dir, args.dupe_threshold)
@@ -151,7 +183,7 @@ def cmd_import(args) -> int:
         print(f"Gates: {len(issues)} issue(s) — schema / dangling-reference:", file=sys.stderr)
         _print_issues(issues)
         return 1
-    print(f"Gates: OK — {len(graph)} concepts, schema + dangling-reference passed.")
+    print(f"Gates: OK — post-import canon has {len(graph)} concepts, schema + dangling-reference passed.")
     return 0
 
 
@@ -371,6 +403,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_imp.add_argument("--canon", help="canon dir (for canonia.yml); default: search from cwd")
     p_imp.add_argument("--out", help="output concepts dir (default: canon's concepts/)")
     p_imp.add_argument("--commit", action="store_true", help="write files (default: dry-run)")
+    p_imp.add_argument(
+        "--force", action="store_true",
+        help="with --commit: write even when the gates fail (exit code stays 1)",
+    )
     p_imp.add_argument(
         "--prune", action="store_true",
         help="remove existing concept files the sources no longer produce "

@@ -76,6 +76,24 @@ def test_build_site_produces_pages_and_index(tmp_path: Path):
     assert {r["id"] for r in records} == {"ci", "testing"}
 
 
+def test_index_page_neutralizes_script_breaking_content(tmp_path: Path):
+    # Concept text is agent-writable; a title/summary containing </script>
+    # must not be able to close the inline INDEX <script> block (stored XSS).
+    svc = _canon(tmp_path)
+    payload = "</script><img src=x onerror=alert(1)>"
+    svc.create(id="evil", title="Evil", domain="process", summary=payload)
+
+    out = tmp_path / "site"
+    build_site(tmp_path, out_dir=out)
+    index = (out / "index.html").read_text(encoding="utf-8")
+
+    assert payload not in index                    # raw payload never appears
+    assert "\\u003c/script" in index               # escaped inside the JSON
+    # the payload still round-trips intact for the search JS
+    records = json.loads((out / "search.json").read_text(encoding="utf-8"))
+    assert {r["id"]: r for r in records}["evil"]["summary"] == payload
+
+
 def test_build_site_banners_and_archived_handling(tmp_path: Path):
     svc = _canon(tmp_path)
     svc.create(id="cicd", title="CI/CD", domain="process", summary="dup")

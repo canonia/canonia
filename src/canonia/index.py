@@ -67,6 +67,13 @@ MAX_TOKENS = 256
 _HF_REPO = "Xenova/all-MiniLM-L6-v2"
 _HF_FILES = {"model": "onnx/model_quantized.onnx", "vocab": "vocab.txt"}
 _HF_URL = "https://huggingface.co/{repo}/resolve/main/{file}"
+# Pinned SHA-256 per fetched file, verified before a download lands in the
+# cache — a tampered upstream/CDN response can never become the model we run.
+# Values match the upstream git-LFS pointers for the repo above @ main.
+_HF_SHA256 = {
+    "model": "afdb6f1a0e45b715d0bb9b11772f032c399babd23bfc31fed1c170afc848bdb1",
+    "vocab": "07eced375cec144d27c900241f3e339478dec958f92fddbc551f295c992038a3",
+}
 
 Logger = Callable[[str], None]
 
@@ -191,19 +198,27 @@ def ensure_model(
         url = _HF_URL.format(repo=_HF_REPO, file=_HF_FILES[key])
         if log:
             log(f"downloading {_HF_FILES[key]} → {dest} …")
-        _download(url, dest)
+        _download(url, dest, sha256=_HF_SHA256[key])
     return paths
 
 
-def _download(url: str, dest: Path) -> None:
+def _download(url: str, dest: Path, sha256: Optional[str] = None) -> None:
     tmp = dest.with_suffix(dest.suffix + ".part")
     req = urllib.request.Request(url, headers={"User-Agent": "canonia-index"})
+    digest = hashlib.sha256()
     with urllib.request.urlopen(req, timeout=120) as resp, open(tmp, "wb") as fh:
         while True:
             chunk = resp.read(1 << 16)
             if not chunk:
                 break
+            digest.update(chunk)
             fh.write(chunk)
+    if sha256 and digest.hexdigest() != sha256:
+        tmp.unlink()
+        raise RuntimeError(
+            f"checksum mismatch for {url}: got {digest.hexdigest()}, expected {sha256} — "
+            "refusing to install the file (upstream changed or the download was tampered with)"
+        )
     tmp.replace(dest)
 
 

@@ -14,6 +14,7 @@ whole-graph property and lives in :mod:`canonia.graph`.
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -37,7 +38,7 @@ KNOWN_KEYS = {
 }
 # The order concept frontmatter is written in.
 _EMIT_ORDER = [
-    "id", "title", "domain", "status", "summary",
+    "id", "title", "domain", "status", "summary", "created", "updated",
     "superseded_by", "redirect", "tags", "references", "source",
 ]
 
@@ -75,6 +76,10 @@ class Concept:
     redirect: Optional[str] = None
     superseded_by: Optional[str] = None
     tags: List[str] = field(default_factory=list)
+    # Provenance timestamps, carried as the raw YAML value (str or date) so a
+    # load→save round-trip re-emits exactly what the author wrote.
+    created: Optional[object] = None
+    updated: Optional[object] = None
     body: str = ""
     extra: Dict[str, object] = field(default_factory=dict)
     path: Optional[Path] = None
@@ -111,6 +116,8 @@ class Concept:
             redirect=(str(meta["redirect"]).strip() if meta.get("redirect") else None),
             superseded_by=(str(meta["superseded_by"]).strip() if meta.get("superseded_by") else None),
             tags=list(meta.get("tags") or []),
+            created=meta.get("created") or None,
+            updated=meta.get("updated") or None,
             body=body,
             extra=extra,
             path=path,
@@ -130,6 +137,10 @@ class Concept:
             "status": self.status,
             "summary": self.summary,
         }
+        if self.created:
+            meta["created"] = self.created
+        if self.updated:
+            meta["updated"] = self.updated
         if self.superseded_by:
             meta["superseded_by"] = self.superseded_by
         if self.redirect:
@@ -151,6 +162,25 @@ class Concept:
     def to_markdown(self) -> str:
         body = self.body.rstrip("\n")
         return markdown.dump_frontmatter(self.frontmatter()) + "\n" + body + "\n"
+
+    def save(self, path: Path) -> None:
+        """Atomically write this concept to ``path`` (temp file + rename).
+
+        A crash mid-write can never leave a truncated concept file, and the
+        temp name starts with a dot so a concurrent :meth:`Graph.load` (which
+        skips dotfiles) never picks up a half-written concept.
+        """
+        path = Path(path)
+        tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        try:
+            tmp.write_text(self.to_markdown(), encoding="utf-8")
+            os.replace(tmp, path)
+        except BaseException:
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+            raise
 
     # --- graph helpers ------------------------------------------------------
 

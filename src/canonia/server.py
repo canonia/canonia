@@ -230,7 +230,10 @@ class CanonService:
             tags=tags or [], body=body,
         )
         self._validate(concept)
-        if self._path_for(concept).exists():
+        # Ids are globally unique across ALL domains: check graph membership,
+        # not just this domain's file path — a same-id file elsewhere would
+        # otherwise be silently shadowed by whichever sorts first on load.
+        if id in self._graph().concepts or self._path_for(concept).exists():
             raise ToolError(f"concept '{id}' already exists; use update")
         path = self._save(concept)
         return self._result(concept, [path], f"Create concept '{id}'", created=True)
@@ -365,6 +368,7 @@ class CanonService:
                 f"Deprecate or merge instead, or pass force=true to break them."
             )
         path = Path(concept.path) if concept.path else self._path_for(concept)
+        self._ensure_contained(path)
         path.unlink(missing_ok=True)
         committed, note = self._maybe_commit([path], f"Remove concept '{id}'")
         warnings = [f"broke dependents: {deps}"] if (deps and force) else []
@@ -400,12 +404,24 @@ class CanonService:
         if issues:
             raise ToolError("; ".join(str(i) for i in issues))
 
+    def _ensure_contained(self, path: Path) -> None:
+        """Refuse any concept path that escapes the concepts directory.
+
+        Containment must hold independently of the id/domain validation: a
+        loosened ``schema.id_pattern`` in canonia.yml (or a future validation
+        regression) must never turn an id into a filesystem escape.
+        """
+        root = self.config.concepts_dir.resolve()
+        if not path.resolve().is_relative_to(root):
+            raise ToolError(f"refusing a path outside the canon: {path.name}")
+
     def _save(self, concept: Concept) -> Path:
-        """Validate then write one concept to disk; return its path."""
+        """Validate then atomically write one concept to disk; return its path."""
         self._validate(concept)
         path = self._path_for(concept)
+        self._ensure_contained(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(concept.to_markdown(), encoding="utf-8")
+        concept.save(path)
         return path
 
     def _relocate(self, concept: Concept, old_path):

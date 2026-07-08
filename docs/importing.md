@@ -5,6 +5,14 @@ and **review-then-commit** — it never silently mangles your docs — and it is
 **pure function** of `(sources + manifest)`, so re-running with the same inputs
 yields byte-identical files (idempotent). Two modes.
 
+The gate check validates the **predicted post-commit canon**: with `--prune`
+that is exactly the emitted set; without it, the emitted concepts overlaid on
+what is already on disk (so a reference to an existing concept is not
+"dangling", and an id clash with an existing concept at another path is
+caught). A failing gate **blocks `--commit`** — nothing is written and the
+command exits 1. `--force` writes anyway (the exit code stays 1) for when you
+deliberately want the broken intermediate state on disk.
+
 ## Zero-config
 
 A folder of markdown → one concept per file. `id` from the file slug, `title` from
