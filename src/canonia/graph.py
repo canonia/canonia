@@ -114,14 +114,21 @@ class Graph:
     def dependents(self, concept_id: str) -> List[str]:
         """Concepts that would break if ``concept_id`` were hard-removed.
 
-        Anything pointing *at* it: a direct reference, a redirect target, or a
-        ``superseded_by``. This is the set the remove gate checks for zero.
+        Anything pointing *at* it: a ``references:`` entry, an inline ``[[id]]``
+        in the body, a redirect target, or a ``superseded_by``. This mirrors
+        exactly what the dangling-reference gate checks, so a remove that
+        passes this gate can never leave the canon failing validation.
         """
         out = set()
         for cid, c in self.concepts.items():
             if cid == concept_id:
                 continue
-            if concept_id in c.references or c.redirect == concept_id or c.superseded_by == concept_id:
+            if (
+                concept_id in c.references
+                or c.redirect == concept_id
+                or c.superseded_by == concept_id
+                or concept_id in c.inline_refs()
+            ):
                 out.add(cid)
         return sorted(out)
 

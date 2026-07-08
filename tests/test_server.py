@@ -65,6 +65,37 @@ def test_service_create_rejects_duplicate_and_bad_domain(tmp_path: Path):
         svc.create(id="x", title="X", domain="nonsense", summary="x")
 
 
+def test_service_create_rejects_duplicate_id_in_another_domain(tmp_path: Path):
+    # Ids are globally unique: an id living under process/ must not be
+    # creatable under infra/ (the impostor would shadow the original on load).
+    svc = CanonService(_canon(tmp_path))
+    with pytest.raises(ToolError, match="already exists"):
+        svc.create(id="testing", title="Imposter", domain="infra", summary="x")
+    assert not (tmp_path / "concepts" / "infra" / "testing.md").exists()
+
+
+def test_write_path_containment_survives_loose_id_pattern(tmp_path: Path):
+    # Containment must hold even when canonia.yml loosens the id pattern —
+    # the regex is validation, not the filesystem boundary.
+    (tmp_path / "canonia.yml").write_text(
+        "canon:\n  root: concepts\n  domains: [process]\n"
+        'schema:\n  id_pattern: "^[a-z0-9./-]+$"\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "concepts" / "process").mkdir(parents=True)
+    svc = CanonService(tmp_path)
+    with pytest.raises(ToolError, match="outside the canon"):
+        svc.create(id="../../escaped", title="X", domain="process", summary="s")
+    assert not (tmp_path / "escaped.md").exists()
+
+
+def test_writes_leave_no_temp_files(tmp_path: Path):
+    svc = CanonService(_canon(tmp_path))
+    svc.create(id="a", title="A", domain="process", summary="a")
+    svc.update("a", summary="changed")
+    assert list(tmp_path.rglob("*.tmp")) == []
+
+
 def test_service_create_warns_on_unresolved_reference(tmp_path: Path):
     svc = CanonService(_canon(tmp_path))
     res = svc.create(id="a", title="A", domain="process", summary="a", references=["ghost"])
@@ -200,6 +231,16 @@ def test_remove_gated_on_zero_dependents(tmp_path: Path):
     assert res["ok"] and res["dependents_broken"] == []
     with pytest.raises(ToolError):
         svc.get("c")
+
+
+def test_remove_gated_on_inline_body_reference(tmp_path: Path):
+    # dependents() must count inline [[id]] refs, exactly like the validate
+    # gate does — otherwise remove can leave the canon failing its own gate.
+    svc = _cluster(tmp_path)
+    svc.update("a", body="See [[c]] for details.")
+    with pytest.raises(ToolError) as exc:
+        svc.remove("c")
+    assert "depend" in str(exc.value)
 
 
 def test_remove_force_breaks_dependents(tmp_path: Path):

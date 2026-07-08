@@ -81,13 +81,21 @@ class ImportPlan:
     # --- writing ------------------------------------------------------------
 
     def write(self, out_dir: Path) -> List[Path]:
-        """Write every emitted concept under ``out_dir/<domain>/<id>.md``."""
+        """Write every emitted concept under ``out_dir/<domain>/<id>.md``.
+
+        Writes are atomic (temp file + rename) and refused if a concept's
+        domain/id would place the file outside ``out_dir`` — containment must
+        not depend on the id pattern alone.
+        """
         out_dir = Path(out_dir)
+        out_root = out_dir.resolve()
         written: List[Path] = []
         for item in self.emitted:
             target = out_dir / item.rel_path
+            if not target.resolve().is_relative_to(out_root):
+                raise ValueError(f"refusing to write outside the canon: {item.rel_path}")
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(item.concept.to_markdown(), encoding="utf-8")
+            item.concept.save(target)
             written.append(target)
         return written
 

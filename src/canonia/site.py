@@ -46,10 +46,16 @@ def build_site(canon_dir=".", out_dir=None, **_ignored) -> dict:
     (out / "c").mkdir(parents=True, exist_ok=True)
 
     broken = 0
+    pages_root = (out / "c").resolve()
     for concept in graph.concepts.values():
         page, page_broken = _concept_page(concept, graph, config)
         broken += page_broken
-        (out / "c" / f"{concept.id}.html").write_text(page, encoding="utf-8")
+        target = out / "c" / f"{concept.id}.html"
+        # Ids come from frontmatter the build does not gate; never let one
+        # steer a write outside the site directory.
+        if not target.resolve().is_relative_to(pages_root):
+            raise ValueError(f"concept id {concept.id!r} escapes the site directory")
+        target.write_text(page, encoding="utf-8")
 
     (out / "index.html").write_text(_index_page(graph, config), encoding="utf-8")
     (out / "search.json").write_text(_search_index(graph), encoding="utf-8")
@@ -182,7 +188,15 @@ def _index_page(graph: Graph, config: CanoniaConfig) -> str:
         )
         domain_blocks.append(f'<section><h2>{html.escape(domain)} <span class="count">{len(items)}</span></h2><ul class="index-list">{lis}</ul></section>')
 
-    index_json = json.dumps(_search_records(graph), ensure_ascii=False)
+    # Concept text is agent-writable: escape `<` so no title/summary can close
+    # this inline <script> block (stored XSS), and the JS line separators so
+    # they can't break the parse. All three escapes are valid inside JSON.
+    index_json = (
+        json.dumps(_search_records(graph), ensure_ascii=False)
+        .replace("<", "\\u003c")
+        .replace("\u2028", "\\u2028")
+        .replace("\u2029", "\\u2029")
+    )
     search = (
         '<input id="q" type="search" placeholder="Search concepts…" autocomplete="off">'
         '<ul id="results" class="index-list"></ul>'

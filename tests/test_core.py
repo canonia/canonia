@@ -76,6 +76,31 @@ def test_validate_good_concept_has_no_issues():
     assert validate_concept(_good(), domains=("infra",)) == []
 
 
+def test_created_updated_frontmatter_round_trip():
+    text = (
+        "---\nid: x\ntitle: X\ndomain: process\nstatus: active\nsummary: s\n"
+        "created: 2026-01-01\nupdated: 2026-06-30\nreferences: []\n"
+        "source:\n- repo: r\n  path: x.md\n---\nBody.\n"
+    )
+    c = Concept.from_markdown(text)
+    assert c.created is not None and c.updated is not None
+    # timestamps are known keys, not "unknown frontmatter"
+    assert not [i for i in validate_concept(c, domains=("process",)) if i.field == "frontmatter"]
+    # ...and they survive a serialize → parse round trip (the server rewrite path)
+    c2 = Concept.from_markdown(c.to_markdown())
+    assert str(c2.created) == "2026-01-01"
+    assert str(c2.updated) == "2026-06-30"
+
+
+def test_concept_save_is_atomic_and_leaves_no_temp(tmp_path: Path):
+    c = _good()
+    target = tmp_path / "x.md"
+    c.save(target)
+    assert Concept.load(target).id == c.id
+    assert list(tmp_path.glob("*.tmp")) == []
+    assert list(tmp_path.glob(".*")) == []  # no stray dotfile temps either
+
+
 def test_validate_flags_bad_id_domain_and_multiline_summary():
     bad = Concept(
         id="Bad ID",
