@@ -14,7 +14,7 @@ versioning + authorship.
 **Status: pre-alpha, v0.1 feature-complete.** Identity reserved (GitHub org
 `canonia`, npm + PyPI `canonia`, Apache-2.0). **schema + graph gates + importer +
 MCP server + static site + semantic index + docs guide are functional** (`canonia
-import` / `validate` / `index` / `serve` / `build`, curated + zero-config, 116 tests
+import` / `validate` / `index` / `serve` / `build`, curated + zero-config, 121 tests
 passing); access.py a no-op seam (reads + writes). MCP tools: search / get / create / update /
 list_domains + lifecycle (deprecate / merge / archive / restore / remove). MCP
 transport and the site are dependency-free stdlib impls (no `mcp` SDK — needs Python
@@ -97,9 +97,10 @@ A full July-2026 audit (security + correctness + architecture, findings
 reproduced, not speculative) lives in **`docs/audit-2026-07.md`** — read it
 before non-trivial work; keep its statuses current when fixing items. Highlights
 still true until marked fixed there: unversioned updates are last-writer-wins
-(opt-in CAS exists: `get`'s `version` → `update`'s `expected_version`); the
-semantic index goes stale on MCP writes (fresh concepts stay keyword-only,
-reported via `"unindexed": N` in search results, until `canonia index build`);
+(opt-in CAS exists: `get`'s `version` → `update`'s `expected_version`); MCP
+writes embed-on-write into the semantic index (degradations warn on the write
+result; `"unindexed": N` in search now flags only external edits/degraded
+writes until `canonia index build`);
 flat ids make future namespacing a migration — the separator is now reserved
 (`.`/`:` hard-rejected in every id regardless of `id_pattern`; the namespacing
 design itself is future work). **Trust layer (2026-07-09):** autocommit default ON; `serve --identity

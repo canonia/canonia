@@ -580,6 +580,54 @@ class EmbeddingIndex:
         row = self.conn.execute("SELECT value FROM meta WHERE key = 'model'").fetchone()
         return row[0] if row else None
 
+    def sync_one(self, concept, model=None) -> str:
+        """The one-concept analogue of :meth:`build`, for embed-on-write.
+
+        Returns what happened: ``removed`` (merged tombstones carry no real
+        body and are never indexed), ``unchanged`` (same content hash),
+        ``retagged`` (text identical but domain/status moved — refreshed in
+        place, no re-embedding), ``added``/``updated`` (embedded), ``skipped``
+        (embedding needed but ``model`` is None), or ``model-mismatch`` (the
+        stored vectors came from a different model; mixing embedding spaces
+        corrupts every similarity, so the concept is left for the next
+        ``canonia index build`` to re-embed consistently).
+        """
+        if self.stored_model() != self.model_name:
+            return "model-mismatch"
+        if concept.status == "merged":
+            self.conn.execute("DELETE FROM embeddings WHERE id = ?", (concept.id,))
+            self.conn.commit()
+            return "removed"
+        text = concept_text(concept)
+        h = _content_hash(text)
+        row = self.conn.execute(
+            "SELECT hash, domain, status FROM embeddings WHERE id = ?", (concept.id,)
+        ).fetchone()
+        if row and row[0] == h:
+            if (row[1], row[2]) != (concept.domain, concept.status):
+                self.conn.execute(
+                    "UPDATE embeddings SET domain = ?, status = ? WHERE id = ?",
+                    (concept.domain, concept.status, concept.id),
+                )
+                self.conn.commit()
+                return "retagged"
+            return "unchanged"
+        if model is None:
+            return "skipped"
+        vec = model.embed_one(text)
+        self.conn.execute(
+            "INSERT OR REPLACE INTO embeddings (id, hash, domain, status, vector) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (concept.id, h, concept.domain, concept.status, _vec_to_blob(vec)),
+        )
+        self.conn.commit()
+        return "updated" if row else "added"
+
+    def remove_id(self, concept_id: str) -> None:
+        """Drop a hard-removed concept's vector (no-op if absent)."""
+        self.conn.execute("DELETE FROM embeddings WHERE id = ?", (concept_id,))
+        self.conn.commit()
+
     # --- read ---------------------------------------------------------------
 
     def __len__(self) -> int:
@@ -807,3 +855,77 @@ class SemanticSearcher:
         finally:
             idx.close()
         return {cid: score for cid, score in hits}
+
+
+class IndexSync:
+    """Server-side embed-on-write: keep the index in step with concept writes.
+
+    Same posture as :class:`SemanticSearcher`: the model loads lazily and is
+    cached; nothing is ever downloaded at serve time; nothing here raises. The
+    concept file on disk is the source of truth and the index is derived state,
+    so every degradation (missing model, foreign-model index, sqlite hiccup)
+    collapses to a human-readable warning pointing at ``canonia index build``
+    instead of failing the write. When the semantic extra is absent or no index
+    was ever built, every call is a no-op — keyword-only canons pay nothing.
+    """
+
+    _REBUILD = "run `canonia index build` to refresh it"
+
+    def __init__(self, config):
+        self.config = config
+        self._model: Optional[EmbeddingModel] = None
+        self._model_failed = False
+        self._ok = deps_available() and index_path_for(config).exists()
+
+    @property
+    def available(self) -> bool:
+        return self._ok
+
+    def _model_or_none(self) -> Optional[EmbeddingModel]:
+        if self._model is None and not self._model_failed:
+            try:
+                self._model = EmbeddingModel.load(_model_dir_for(self.config), allow_download=False)
+            except Exception:
+                self._model_failed = True
+        return self._model
+
+    def upsert(self, concept) -> Optional[str]:
+        """Sync one just-written concept. None when the index is in step (or
+        this sync is a structural no-op); a warning string when it is not."""
+        if not self._ok:
+            return None
+        idx = open_index(self.config)
+        if idx is None:
+            return None
+        try:
+            # First pass without the model: removed/retagged/unchanged (and the
+            # mismatch guard) need no embedding, so retag-only writes never pay
+            # the model load. Only an actual embed asks for the model.
+            action = idx.sync_one(concept, None)
+            if action == "skipped":
+                action = idx.sync_one(concept, self._model_or_none())
+            if action == "skipped":
+                return (f"semantic index not updated for '{concept.id}' "
+                        f"(embedding model unavailable); {self._REBUILD}")
+            if action == "model-mismatch":
+                return f"semantic index was built with a different model; {self._REBUILD}"
+            return None
+        except Exception as e:
+            return f"semantic index update failed for '{concept.id}' ({e}); {self._REBUILD}"
+        finally:
+            idx.close()
+
+    def remove(self, concept_id: str) -> Optional[str]:
+        """Drop a hard-removed concept's vector; warning on failure, else None."""
+        if not self._ok:
+            return None
+        idx = open_index(self.config)
+        if idx is None:
+            return None
+        try:
+            idx.remove_id(concept_id)
+            return None
+        except Exception as e:
+            return f"semantic index update failed for '{concept_id}' ({e}); {self._REBUILD}"
+        finally:
+            idx.close()

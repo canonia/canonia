@@ -233,6 +233,34 @@ def test_open_index_absent_returns_none(tmp_path):
     assert index.index_path_for(config).name == "embeddings.db"
 
 
+# --- embed-on-write (store level) -------------------------------------------
+
+def test_sync_one_mirrors_build_semantics(tmp_path):
+    config = _canon(tmp_path)
+    model = FakeModel()
+    with index.EmbeddingIndex(index.index_path_for(config)) as idx:
+        idx.build([_concept("alpha", "alpha widgets")], model)
+
+        fresh = _concept("beta", "beta gadgets")
+        assert idx.sync_one(fresh, model) == "added"
+        assert idx.sync_one(fresh, model) == "unchanged"
+
+        fresh.domain = "infra"                            # text untouched
+        assert idx.sync_one(fresh, None) == "retagged"    # no model needed
+
+        fresh.body = "new body content"
+        assert idx.sync_one(fresh, None) == "skipped"     # embedding needs a model
+        assert idx.sync_one(fresh, model) == "updated"
+
+        fresh.status, fresh.redirect = "merged", "alpha"
+        assert idx.sync_one(fresh, None) == "removed"     # tombstones are dropped
+        assert len(idx) == 1
+
+        idx.remove_id("alpha")
+        assert len(idx) == 0
+        idx.remove_id("alpha")                            # absent id is a no-op
+
+
 # --- server hybrid wiring (offline: model loader is monkeypatched) ---------
 
 def test_server_search_goes_hybrid_with_index(tmp_path, monkeypatch):
@@ -305,6 +333,120 @@ def test_server_search_keyword_only_without_index(tmp_path):
     result = CanonService(tmp_path).search("alpha", limit=5)
     assert "mode" not in result                       # no index ⇒ plain keyword
     assert isinstance(result["results"][0]["score"], int)
+
+
+# --- embed-on-write (server wiring) -----------------------------------------
+
+def _index_row(config, cid):
+    with index.EmbeddingIndex(index.index_path_for(config)) as idx:
+        return idx.conn.execute(
+            "SELECT hash, domain, status FROM embeddings WHERE id = ?", (cid,)
+        ).fetchone()
+
+
+def test_server_writes_keep_index_fresh(tmp_path, monkeypatch):
+    pytest.importorskip("onnxruntime")
+    from canonia.graph import Graph
+    from canonia.server import CanonService
+
+    config = _canon(tmp_path)
+    seed = _concept("alpha-widget", "alpha widgets and things")
+    (tmp_path / "concepts" / "process" / "alpha-widget.md").write_text(
+        seed.to_markdown(), encoding="utf-8"
+    )
+    model = FakeModel()
+    with index.EmbeddingIndex(index.index_path_for(config)) as idx:
+        idx.build(list(Graph.load(config.concepts_dir).concepts.values()), model)
+    monkeypatch.setattr(index.EmbeddingModel, "load", classmethod(lambda cls, *a, **k: model))
+
+    svc = CanonService(tmp_path, autocommit=False)
+    res = svc.create(id="gamma-doodad", title="Gamma doodad", domain="process",
+                     summary="gamma doodads galore")
+    assert res["ok"] and res["warnings"] == []
+    assert _index_row(config, "gamma-doodad") is not None
+
+    # The fresh concept is semantically searchable immediately — no staleness.
+    result = svc.search("gamma doodads", limit=5)
+    assert result.get("mode") == "hybrid"
+    assert "unindexed" not in result
+    assert result["results"][0]["id"] == "gamma-doodad"
+    assert "semantic" in result["results"][0]
+
+    # A text change re-embeds (hash moves); a domain move retags in place.
+    h1 = _index_row(config, "gamma-doodad")[0]
+    svc.update("gamma-doodad", summary="entirely different words now")
+    assert _index_row(config, "gamma-doodad")[0] != h1
+    svc.update("gamma-doodad", domain="infra")
+    assert _index_row(config, "gamma-doodad")[1] == "infra"
+
+    # A merge drops the tombstone's vector; a hard remove drops the row.
+    svc.merge("gamma-doodad", into="alpha-widget")
+    assert _index_row(config, "gamma-doodad") is None
+    svc.create(id="delta-thing", title="Delta thing", domain="process",
+               summary="delta things entirely")
+    assert _index_row(config, "delta-thing") is not None
+    svc.remove("delta-thing")
+    assert _index_row(config, "delta-thing") is None
+
+
+def test_server_write_warns_when_embedding_model_unavailable(tmp_path, monkeypatch):
+    # The write must succeed (the file is the source of truth); the index
+    # degradation surfaces as a result warning pointing at `index build`.
+    pytest.importorskip("onnxruntime")
+    from canonia.server import CanonService
+
+    config = _canon(tmp_path)
+    with index.EmbeddingIndex(index.index_path_for(config)) as idx:
+        idx.build([], FakeModel())                    # index exists; no model cache
+
+    def boom(cls, *a, **k):
+        raise RuntimeError("no model on this machine")
+    monkeypatch.setattr(index.EmbeddingModel, "load", classmethod(boom))
+
+    svc = CanonService(tmp_path, autocommit=False)
+    res = svc.create(id="gamma", title="Gamma", domain="process", summary="gamma things")
+    assert res["ok"]
+    assert any("canonia index build" in w for w in res["warnings"])
+    assert _index_row(config, "gamma") is None
+
+
+def test_server_write_never_mixes_into_foreign_model_index(tmp_path, monkeypatch):
+    pytest.importorskip("onnxruntime")
+    from canonia.server import CanonService
+
+    config = _canon(tmp_path)
+    with index.EmbeddingIndex(index.index_path_for(config), model_name="some-other-model") as idx:
+        idx.build([], FakeModel())
+    model = FakeModel()
+    monkeypatch.setattr(index.EmbeddingModel, "load", classmethod(lambda cls, *a, **k: model))
+
+    svc = CanonService(tmp_path, autocommit=False)
+    res = svc.create(id="gamma", title="Gamma", domain="process", summary="gamma stuff")
+    assert res["ok"]
+    assert any("different model" in w for w in res["warnings"])
+    with index.EmbeddingIndex(index.index_path_for(config), model_name="some-other-model") as idx:
+        assert len(idx) == 0                          # nothing mixed into that space
+
+
+def test_server_write_skips_index_when_semantic_disabled(tmp_path, monkeypatch):
+    pytest.importorskip("onnxruntime")
+    from canonia.server import CanonService
+
+    (tmp_path / "canonia.yml").write_text(
+        "canon:\n  root: concepts\n  domains: [process]\nindex:\n  semantic: false\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "concepts" / "process").mkdir(parents=True)
+    config = CanoniaConfig.load(tmp_path)
+    with index.EmbeddingIndex(index.index_path_for(config)) as idx:
+        idx.build([], FakeModel())
+    monkeypatch.setattr(index.EmbeddingModel, "load", classmethod(lambda cls, *a, **k: FakeModel()))
+
+    svc = CanonService(tmp_path, autocommit=False)
+    res = svc.create(id="gamma", title="Gamma", domain="process", summary="gamma")
+    assert res["ok"] and res["warnings"] == []
+    with index.EmbeddingIndex(index.index_path_for(config)) as idx:
+        assert len(idx) == 0
 
 
 def test_vocab_from_file_strips_crlf(tmp_path: Path):

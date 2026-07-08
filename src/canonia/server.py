@@ -32,7 +32,7 @@ from canonia.config import CanoniaConfig
 from canonia.graph import Graph
 
 if TYPE_CHECKING:  # imported lazily at runtime (the semantic extra may be absent)
-    from canonia.index import SemanticSearcher
+    from canonia.index import IndexSync, SemanticSearcher
 from canonia.schema import Concept, validate_concept
 
 PROTOCOL_VERSION = "2025-06-18"
@@ -99,6 +99,12 @@ class CanonService:
         # the server starts (and stays keyword-only canons stay) dependency-free.
         self._searcher: Optional["SemanticSearcher"] = None
         self._searcher_ready = False
+        # Embed-on-write mirror of the above: built lazily on the first write,
+        # a no-op without the extra/index. Warnings it produces are drained
+        # into the next tool result rather than failing the write.
+        self._index_sync: Optional["IndexSync"] = None
+        self._index_sync_ready = False
+        self._index_warnings: List[str] = []
 
     # --- helpers ------------------------------------------------------------
 
@@ -472,10 +478,16 @@ class CanonService:
         path = Path(concept.path) if concept.path else self._path_for(concept)
         self._ensure_contained(path)
         path.unlink(missing_ok=True)
+        sync = self._index_sync_or_none()
+        if sync is not None:
+            index_note = sync.remove(id)
+            if index_note:
+                self._index_warnings.append(index_note)
         committed, note = self._maybe_commit([path], f"Remove concept '{id}'")
         warnings = [f"broke dependents: {deps}"] if (deps and force) else []
         if note:
             warnings.append(note)
+        warnings += self._drain_index_warnings()
         return {
             "ok": True,
             "id": id,
@@ -547,7 +559,41 @@ class CanonService:
         self._ensure_contained(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         concept.save(path)
+        self._index_after_write(concept)
         return path
+
+    def _index_sync_or_none(self) -> Optional["IndexSync"]:
+        if not self._index_sync_ready:
+            self._index_sync_ready = True
+            if self.config.index_semantic:
+                try:
+                    from canonia import index
+
+                    sync = index.IndexSync(self.config)
+                    self._index_sync = sync if sync.available else None
+                except Exception:  # pragma: no cover - defensive
+                    self._index_sync = None
+        return self._index_sync
+
+    def _index_after_write(self, concept: Concept) -> None:
+        """Embed-on-write: keep the semantic index in step with this write.
+
+        Best-effort by contract — the concept file is the source of truth and
+        the index is derived, so a degraded index warns on the tool result
+        (via :meth:`_drain_index_warnings`) instead of failing the write.
+        """
+        sync = self._index_sync_or_none()
+        if sync is None:
+            return
+        warning = sync.upsert(concept)
+        if warning:
+            self._index_warnings.append(warning)
+
+    def _drain_index_warnings(self) -> List[str]:
+        # Deduped: a multi-write tool (merge) hitting the same degradation for
+        # every concept should say it once, not once per file.
+        out, self._index_warnings = _dedup(self._index_warnings), []
+        return out
 
     def _relocate(self, concept: Concept, old_path):
         """Save ``concept``; if its file moved (domain change), stage both paths."""
@@ -569,6 +615,7 @@ class CanonService:
         ]
         if concept.superseded_by and concept.superseded_by not in graph.concepts:
             warnings.append(f"superseded_by '{concept.superseded_by}' does not resolve yet")
+        warnings += self._drain_index_warnings()
         result = {
             "ok": True,
             "id": concept.id,
