@@ -190,6 +190,43 @@ def test_server_search_goes_hybrid_with_index(tmp_path, monkeypatch):
     assert "semantic" in result["results"][0]
 
 
+def test_server_search_does_not_downrank_unindexed_concepts(tmp_path, monkeypatch):
+    # A concept created AFTER the last index build has no vector. It must be
+    # scored on keywords alone — blending in sim=0 would cap it at half the
+    # reachable score, so fresh knowledge would always lose to stale knowledge.
+    pytest.importorskip("onnxruntime")
+    from canonia.server import CanonService
+
+    config = _canon(tmp_path)
+    indexed = _concept("alpha-widget", "alpha widgets and things")
+    (tmp_path / "concepts" / "process" / "alpha-widget.md").write_text(
+        indexed.to_markdown(), encoding="utf-8"
+    )
+    model = FakeModel()
+    with index.EmbeddingIndex(index.index_path_for(config)) as idx:
+        from canonia.graph import Graph
+        idx.build(list(Graph.load(config.concepts_dir).concepts.values()), model)
+
+    # ...then a new concept lands via the server, after the build.
+    fresh = _concept("alpha-fresh", "alpha fresh things")
+    (tmp_path / "concepts" / "process" / "alpha-fresh.md").write_text(
+        fresh.to_markdown(), encoding="utf-8"
+    )
+
+    monkeypatch.setattr(index.EmbeddingModel, "load", classmethod(lambda cls, *a, **k: model))
+    result = CanonService(tmp_path).search("alpha", limit=5)
+
+    assert result.get("mode") == "hybrid"
+    assert result.get("unindexed") == 1               # staleness is reported
+    rows = {r["id"]: r for r in result["results"]}
+    assert set(rows) == {"alpha-widget", "alpha-fresh"}
+    assert "semantic" not in rows["alpha-fresh"]      # no fake sim=0 shown
+    assert "semantic" in rows["alpha-widget"]
+    # equal keyword hits: the fresh concept must NOT be capped below the
+    # indexed one (pre-fix it scored 0.5 vs the indexed concept's 0.5 + sim/2)
+    assert rows["alpha-fresh"]["score"] >= rows["alpha-widget"]["score"]
+
+
 def test_server_search_keyword_only_without_index(tmp_path):
     from canonia.server import CanonService
 

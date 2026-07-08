@@ -124,14 +124,26 @@ class CanonService:
         kw_max = max(keyword.values(), default=0) or 1
 
         scored = []
+        unindexed = 0
         for c in candidates:
             kw = keyword[c.id]
-            sim = sem.get(c.id, 0.0)
-            if terms and kw <= 0 and sim < _SEM_FLOOR:
+            # sim=None ⇒ no vector for this concept (created or changed since
+            # the last `canonia index build`) — distinct from a genuine low sim.
+            sim = sem.get(c.id) if sem else None
+            if terms and kw <= 0 and (sim or 0.0) < _SEM_FLOOR:
                 continue  # neither a keyword nor a semantic hit
-            # Hybrid blend when semantic is live; exact keyword score otherwise so
-            # keyword-only behavior (and its integer scores) is unchanged.
-            combined = ((1 - weight) * (kw / kw_max) + weight * max(sim, 0.0)) if sem else float(kw)
+            if not sem:
+                # Keyword-only mode: exact integer scores, unchanged behavior.
+                combined = float(kw)
+            elif sim is None:
+                # Not in the index yet: score on keywords alone. Blending in
+                # sim=0 would cap fresh concepts at (1-weight) of the reachable
+                # score — systematically down-ranking the newest knowledge
+                # until the next index build.
+                combined = kw / kw_max
+                unindexed += 1
+            else:
+                combined = (1 - weight) * (kw / kw_max) + weight * max(sim, 0.0)
             scored.append((combined, kw, sim, c))
         scored.sort(key=lambda t: (-t[0], t[3].id))
 
@@ -145,12 +157,16 @@ class CanonService:
                 "summary": c.summary,
                 "score": round(combined, 4) if sem else kw,
             }
-            if sem:
+            if sem and sim is not None:
                 row["semantic"] = round(sim, 4)
             results.append(row)
         out = {"query": query, "count": len(results), "results": results}
         if sem:
             out["mode"] = "hybrid"
+            if unindexed:
+                # Staleness signal: this many matched concepts have no vector
+                # yet — the index predates them. Re-run `canonia index build`.
+                out["unindexed"] = unindexed
         return out
 
     def _semantic_scores(self, query: str, domain: Optional[str]) -> Dict[str, float]:
@@ -318,16 +334,23 @@ class CanonService:
         src.references, src.superseded_by = [], None
         src.body = f"Merged into [[{into}]]."
 
-        commit_paths = [self._save(tgt), self._save(src)]
-
+        to_write: List[Concept] = [tgt, src]
         repointed: List[str] = []
         if repoint:
             for cid, c in graph.concepts.items():
                 if cid in (id, into) or id not in c.references:
                     continue
                 c.references = _dedup([into if r == id else r for r in c.references])
-                commit_paths.append(self._save(c))
+                to_write.append(c)
                 repointed.append(cid)
+
+        # Validate every mutated concept BEFORE writing any of them: a
+        # validation failure (e.g. a legacy source concept that predates the
+        # schema) must not leave a half-merged canon on disk — target rewritten
+        # with absorbed provenance but no tombstone.
+        for c in to_write:
+            self._validate(c)
+        commit_paths = [self._save(c) for c in to_write]
 
         result = self._result(src, commit_paths, f"Merge '{id}' into '{into}'", created=False)
         result.update({"merged_into": into, "repointed": sorted(repointed)})

@@ -77,6 +77,11 @@ index:
 
 The server reads the index as of the last **build**; concepts written via MCP are
 found by keyword immediately but only join semantic results after the next
+`canonia index build`. A concept with no vector yet is scored on keywords alone
+(it is **not** blended with a zero semantic score, which would systematically
+down-rank the newest knowledge), its result row carries no `semantic` field, and
+the response reports how many matched concepts the index hasn't caught up with:
+`"unindexed": N` — a nonzero value means it's time to re-run
 `canonia index build`.
 
 ## Backends
