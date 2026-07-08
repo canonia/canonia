@@ -26,6 +26,12 @@ from canonia import markdown
 # Validated with fullmatch, so a user-supplied pattern need not be anchored and
 # '$' cannot admit a trailing newline.
 DEFAULT_ID_PATTERN = r"^[a-z0-9]+(?:-[a-z0-9]+)*$"
+# '.' and ':' are reserved for future id namespacing (e.g. `infra:deploy-key`).
+# Flat ids are baked into filenames, site URLs, sqlite primary keys, and the
+# wikilink syntax, so an id minted with either character today would turn
+# namespacing into a breaking migration. Rejected in every id position
+# regardless of `schema.id_pattern` — a loosened pattern cannot re-admit them.
+RESERVED_ID_CHARS = ".:"
 DEFAULT_DOMAINS = ("process", "lore", "infra", "ops")
 # Lifecycle states. active/draft/deprecated are live (resolve to themselves);
 # merged is a redirect tombstone (forwards via `redirect`); archived is dropped
@@ -213,6 +219,21 @@ def _normalize_source(source) -> List[Dict[str, str]]:
 
 # --- validation -------------------------------------------------------------
 
+def id_problem(value: str, id_re: re.Pattern) -> Optional[str]:
+    """Why ``value`` cannot be a concept id, or ``None`` if it can.
+
+    Checks the (configurable) pattern, then the non-configurable
+    reserved-separator rule.
+    """
+    if not id_re.fullmatch(value):
+        return f"does not match {id_re.pattern}"
+    hit = sorted(set(value) & set(RESERVED_ID_CHARS))
+    if hit:
+        chars = ", ".join(repr(c) for c in hit)
+        return f"contains {chars}, reserved for future namespacing (rejected regardless of id_pattern)"
+    return None
+
+
 def validate_concept(
     concept: Concept,
     *,
@@ -229,8 +250,10 @@ def validate_concept(
 
     if not concept.id:
         issues.append(Issue(who, "id", "missing"))
-    elif not id_re.fullmatch(concept.id):
-        issues.append(Issue(who, "id", f"'{concept.id}' does not match {id_pattern}"))
+    else:
+        problem = id_problem(concept.id, id_re)
+        if problem:
+            issues.append(Issue(who, "id", f"'{concept.id}' {problem}"))
 
     if not concept.title:
         issues.append(Issue(who, "title", "missing"))
@@ -262,13 +285,15 @@ def validate_concept(
         )
 
     for ref in concept.references:
-        if not isinstance(ref, str) or not id_re.fullmatch(ref):
-            issues.append(Issue(who, "references", f"invalid id '{ref}'"))
+        problem = id_problem(ref, id_re) if isinstance(ref, str) else "not a string"
+        if problem:
+            issues.append(Issue(who, "references", f"invalid id '{ref}': {problem}"))
 
     # Lifecycle pointers: shape only; resolution is a graph-level gate.
     if concept.redirect is not None:
-        if not id_re.fullmatch(concept.redirect):
-            issues.append(Issue(who, "redirect", f"invalid id '{concept.redirect}'"))
+        problem = id_problem(concept.redirect, id_re)
+        if problem:
+            issues.append(Issue(who, "redirect", f"invalid id '{concept.redirect}': {problem}"))
         elif concept.redirect == concept.id:
             issues.append(Issue(who, "redirect", "concept redirects to itself"))
         if concept.status != "merged":
@@ -277,8 +302,9 @@ def validate_concept(
         issues.append(Issue(who, "status", "'merged' requires a 'redirect' target"))
 
     if concept.superseded_by is not None:
-        if not id_re.fullmatch(concept.superseded_by):
-            issues.append(Issue(who, "superseded_by", f"invalid id '{concept.superseded_by}'"))
+        problem = id_problem(concept.superseded_by, id_re)
+        if problem:
+            issues.append(Issue(who, "superseded_by", f"invalid id '{concept.superseded_by}': {problem}"))
         elif concept.superseded_by == concept.id:
             issues.append(Issue(who, "superseded_by", "concept supersedes itself"))
 

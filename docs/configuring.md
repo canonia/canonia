@@ -51,7 +51,7 @@ import:                      # source repos the importer reads (dev-time)
 | `canon.root` | `concepts` | Directory (under the canon root) that holds domain folders. |
 | `canon.name` | `canon` | Provenance repo name for concepts authored in the canon (via the MCP `create` tool). |
 | `canon.domains` | `[process, lore, infra, ops]` | The valid domains; each is a subfolder of `canon.root`. A concept's `domain` must match its folder. |
-| `schema.id_pattern` | `^[a-z0-9]+(?:-[a-z0-9]+)*$` | Regex every `id` (and reference) must match **in full** (`re.fullmatch`, so anchors are optional). |
+| `schema.id_pattern` | `^[a-z0-9]+(?:-[a-z0-9]+)*$` | Regex every `id` (and reference) must match **in full** (`re.fullmatch`, so anchors are optional). `.` and `:` are reserved for future namespacing and rejected in every id **regardless of this pattern**. |
 | `git.autocommit` | `true` | Commit each MCP write locally (the audit trail). Never pushes. See [serving](serving.md). |
 | `mcp.name` | `canonia` | The server identity reported in the MCP handshake. |
 | `site.generator` | `builtin` | Static-site backend. |
