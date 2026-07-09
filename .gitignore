@@ -11,3 +11,7 @@ dist/
 
 # OS
 .DS_Store
+
+# Internal-only documents — never publish (maintainer + agents local use)
+docs/audit-*.md
+docs/performance.md
