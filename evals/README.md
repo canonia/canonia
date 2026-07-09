@@ -1,6 +1,6 @@
 # Retrieval/task eval — does a canon over MCP beat "CLAUDE.md + grep"?
 
-The July 2026 audit ([second pass](../docs/audit-2026-07-pass2.md)) concluded
+The July 2026 internal audit concluded
 that canonia's read side is RAG and must be **measured, not assumed** — the
 competitive risk is not an incumbent product but *"CLAUDE.md + grep is good
 enough."* This eval is the artifact that settles it. If the canon does not
