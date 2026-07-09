@@ -91,22 +91,21 @@ Build order: **schema → importer** (seed + validate on real data) → server �
   canon equals the emitted set, so the gate previews the result). Default is
   add/update-only.
 
-## Known issues — READ docs/audit-2026-07.md before changing code
+## Behavior notes — measured limits live in docs/performance.md
 
-A full July-2026 audit (security + correctness + architecture, findings
-reproduced, not speculative) lives in **`docs/audit-2026-07.md`** — read it
-before non-trivial work; keep its statuses current when fixing items. Highlights
-still true until marked fixed there: unversioned updates are last-writer-wins
-(opt-in CAS exists: `get`'s `version` → `update`'s `expected_version`); MCP
-writes embed-on-write into the semantic index (degradations warn on the write
-result; `"unindexed": N` in search now flags only external edits/degraded
-writes until `canonia index build`);
-flat ids make future namespacing a migration — the separator is now reserved
-(`.`/`:` hard-rejected in every id regardless of `id_pattern`; the namespacing
-design itself is future work). **Trust layer (2026-07-09):** autocommit default ON; `serve --identity
-NAME --identity-kind llm|human` (or `$CANONIA_IDENTITY`) → git author
-`name <kind@canonia>`; named identities default to `llm`; LLM creates land as
-`status: draft`; server stamps `created`/`updated`.
+Measured behavior (July 2026, pre-alpha), stated as facts to design against:
+unversioned updates are last-writer-wins; opt-in CAS exists (`get`'s
+`version` → `update`'s `expected_version`) and narrows but does not close the
+lost-update window under hot same-concept contention — numbers and practical
+guidance in `docs/performance.md`. MCP writes embed-on-write into the semantic
+index (degradations warn on the write result; `"unindexed": N` in search flags
+only external edits/degraded writes until `canonia index build`). Flat ids
+make future namespacing a migration — the separator is reserved (`.`/`:`
+hard-rejected in every id regardless of `id_pattern`; the namespacing design
+itself is future work). **Trust layer (2026-07-09):** autocommit default ON;
+`serve --identity NAME --identity-kind llm|human` (or `$CANONIA_IDENTITY`) →
+git author `name <kind@canonia>`; named identities default to `llm`; LLM
+creates land as `status: draft`; server stamps `created`/`updated`.
 
 ## Working agreements
 
