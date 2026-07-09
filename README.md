@@ -73,6 +73,8 @@ canonia build && open site/index.html
   LLM (Claude Code, Claude Desktop, Cursor, and other MCP clients) to actually use
   the canon.
 - **[indexing](docs/indexing.md)** — the offline semantic index and hybrid search.
+- **[performance](docs/performance.md)** — measured latency by canon size and
+  behavior under concurrent agents: real numbers, honest limits.
 - **[deploying](docs/deploying.md)** — serve the canon **privately** (no built-in
   auth yet).
 
@@ -96,7 +98,8 @@ Configuration for all of them lives in one file, `canonia.yml`
 - **Reference, not copy** — two link layers: `references:` frontmatter (the
   authoritative graph the gate enforces) + `[[id]]` inline links in prose.
 - **No locking** — git merge / optimistic concurrency instead, so async agent
-  sessions never block each other.
+  sessions never block each other. Measured under real concurrent writers —
+  guarantees and limits in [performance](docs/performance.md).
 - **Permissive writes, strict gate** — agents can create a concept that references
   one that doesn't exist yet (a warning); `canonia validate` is the hard gate for CI.
 - **Fully offline & private** — the semantic index runs a local ONNX model; a

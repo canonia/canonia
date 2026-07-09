@@ -14,4 +14,4 @@ dist/
 
 # Internal-only documents — never publish (maintainer + agents local use)
 docs/audit-*.md
-docs/performance.md
+CLAUDE.local.md
