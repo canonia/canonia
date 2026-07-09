@@ -17,6 +17,7 @@ from . import claude_cli, workspace
 from .probe import ProbeError
 
 MAX_RATE_LIMIT_WAITS = 18  # x rate_limit_wait_s (default 20 min) = up to 6 h
+MAX_TRANSIENT_RETRIES = 3  # fresh-workspace retries on API hiccups/timeouts
 
 
 class PreflightError(Exception):
@@ -113,40 +114,47 @@ def run_one(cfg, task, arm, rep, model, out_root, template, preflight_info,
         **preflight_info,
     }
 
-    try:
-        frag = workspace.build_workspace(cfg, task, arm, run_dir / "ws", template)
-        manifest.update(frag)
-    except ProbeError as exc:
-        # P2-C5 guard tripped: this run must not be counted as hybrid.
-        manifest.update(status="invalid_probe", error=str(exc), ended=_now())
-        _write(manifest_path, manifest)
-        log(f"{run_id}: INVALID (hybrid probe failed) — {exc}")
-        return manifest
-
-    kwargs = dict(
-        prompt=str(task["prompt"]),
-        cwd=run_dir / "ws" / "repo",
-        model=model,
-        transcript_path=run_dir / "transcript.jsonl",
-        max_turns=int(cfg["max_turns"]),
-        timeout_s=int(cfg["run_timeout_s"]),
-    )
-    if arm == "B":
-        kwargs["mcp_config"] = frag["mcp_config"]
-    elif arm == "C":
-        kwargs["add_dirs"] = [frag["notes_dir"]]
-
-    waits = 0
+    # Every attempt gets a FRESH workspace: a retried agent must never see the
+    # half-finished work of a dead attempt (build_workspace rmtree's first).
+    rate_waits = transient_retries = 0
     while True:
+        try:
+            frag = workspace.build_workspace(cfg, task, arm, run_dir / "ws", template)
+            manifest.update(frag)
+        except ProbeError as exc:
+            # P2-C5 guard tripped: this run must not be counted as hybrid.
+            manifest.update(status="invalid_probe", error=str(exc), ended=_now())
+            _write(manifest_path, manifest)
+            log(f"{run_id}: INVALID (hybrid probe failed) — {exc}")
+            return manifest
+
+        kwargs = dict(
+            prompt=str(task["prompt"]),
+            cwd=run_dir / "ws" / "repo",
+            model=model,
+            transcript_path=run_dir / "transcript.jsonl",
+            max_turns=int(cfg["max_turns"]),
+            timeout_s=int(cfg["run_timeout_s"]),
+        )
+        if arm == "B":
+            kwargs["mcp_config"] = frag["mcp_config"]
+        elif arm == "C":
+            kwargs["add_dirs"] = [frag["notes_dir"]]
+
         res = claude_cli.run_claude(**kwargs)
-        if res["status"] != "rate_limited":
-            break
-        waits += 1
-        if waits > MAX_RATE_LIMIT_WAITS:
-            break
-        log(f"{run_id}: plan window exhausted — pausing "
-            f"{cfg['rate_limit_wait_s']}s (wait {waits}/{MAX_RATE_LIMIT_WAITS})")
-        time.sleep(int(cfg["rate_limit_wait_s"]))
+        if res["status"] == "rate_limited" and rate_waits < MAX_RATE_LIMIT_WAITS:
+            rate_waits += 1
+            log(f"{run_id}: plan window exhausted — pausing "
+                f"{cfg['rate_limit_wait_s']}s (wait {rate_waits}/{MAX_RATE_LIMIT_WAITS})")
+            time.sleep(int(cfg["rate_limit_wait_s"]))
+            continue
+        if res["status"] in ("transient", "timeout") and transient_retries < MAX_TRANSIENT_RETRIES:
+            transient_retries += 1
+            log(f"{run_id}: {res['status']} failure — fresh retry "
+                f"{transient_retries}/{MAX_TRANSIENT_RETRIES} in 60s")
+            time.sleep(60)
+            continue
+        break
 
     (run_dir / "artifact.diff").write_text(
         workspace.collect_diff(run_dir / "ws" / "repo"), encoding="utf-8")
@@ -156,7 +164,8 @@ def run_one(cfg, task, arm, rep, model, out_root, template, preflight_info,
         status=res["status"], usage=res.get("usage"),
         total_cost_usd=res.get("total_cost_usd"), num_turns=res.get("num_turns"),
         duration_s=res.get("duration_s"), rc=res.get("rc"),
-        rate_limit_waits=waits, ended=_now(),
+        rate_limit_waits=rate_waits, transient_retries=transient_retries,
+        ended=_now(),
     )
     if res["status"] != "completed":
         manifest["stderr_tail"] = res.get("stderr_tail")

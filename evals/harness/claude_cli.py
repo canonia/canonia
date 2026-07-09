@@ -22,6 +22,14 @@ RATE_LIMIT_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Infrastructure hiccups worth an automatic fresh retry (observed in the
+# pilot: "the socket connection was closed unexpectedly" after 48 good turns).
+TRANSIENT_RE = re.compile(
+    r"socket.*closed|ECONNRESET|ETIMEDOUT|fetch failed|network error|"
+    r"connection (reset|refused|closed)|internal server error|\b5\d\d\b",
+    re.IGNORECASE,
+)
+
 STRIP_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
 
 # Explicit tool grant instead of --dangerously-skip-permissions: everything a
@@ -98,6 +106,8 @@ def run_claude(prompt, cwd, model, transcript_path, mcp_config=None, add_dirs=()
             res["status"] = "completed"
         elif RATE_LIMIT_RE.search(res["result_text"]):
             res["status"] = "rate_limited"
+        elif TRANSIENT_RE.search(res["result_text"]):
+            res["status"] = "transient"
         else:
             res["status"] = "error"
             res["error_subtype"] = result_obj.get("subtype")
