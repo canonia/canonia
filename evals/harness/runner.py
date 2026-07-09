@@ -40,13 +40,20 @@ def preflight(cfg):
     if canonia_v is None:
         problems.append(f"canonia venv binary not runnable: {cfg['canonia_bin']}")
 
-    # The eval measures canonia AS-IS at the pinned commit: HEAD must match and
-    # the retrieval path must be pristine (docs-only dirt is tolerated).
+    # The eval measures canonia AS-IS at the pinned commit. HEAD may advance
+    # (the harness itself lands in commits), but the measured code paths must
+    # be byte-identical to the pin, both in HEAD and in the working tree.
     head = _cmd_out(["git", "-C", cfg["canonia_repo"], "rev-parse", "HEAD"])
-    if head != cfg["canonia_commit"]:
-        problems.append(f"canonia HEAD {head!r} != pinned {cfg['canonia_commit']!r}")
+    measured = ["src", "tests", "pyproject.toml"]
+    drifted = _cmd_out(["git", "-C", cfg["canonia_repo"], "diff", "--name-only",
+                        cfg["canonia_commit"], "HEAD", "--", *measured])
+    if drifted is None:
+        problems.append(f"cannot diff against pinned {cfg['canonia_commit']!r}")
+    elif drifted:
+        problems.append("canonia measured paths drifted from the pinned commit "
+                        f"(eval must run the audit-snapshot code):\n{drifted}")
     dirty = _cmd_out(["git", "-C", cfg["canonia_repo"], "status", "--porcelain",
-                      "--", "src", "tests", "pyproject.toml"])
+                      "--", *measured])
     if dirty:
         problems.append(f"canonia src/tests dirty — eval must run pristine code:\n{dirty}")
 
