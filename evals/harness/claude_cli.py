@@ -18,7 +18,8 @@ from pathlib import Path
 # instead of burning attempts. Kept deliberately broad; misclassification only
 # costs one extra wait-and-retry.
 RATE_LIMIT_RE = re.compile(
-    r"usage limit|rate.?limit|out of extra usage|quota|too many requests|429|overloaded",
+    r"usage limit|session limit|hit your .*limit|resets \d|rate.?limit|"
+    r"out of extra usage|quota|too many requests|429|overloaded",
     re.IGNORECASE,
 )
 
@@ -104,7 +105,11 @@ def run_claude(prompt, cwd, model, transcript_path, mcp_config=None, add_dirs=()
                    num_turns=result_obj.get("num_turns"))
         if result_obj.get("subtype") == "success" and not result_obj.get("is_error"):
             res["status"] = "completed"
-        elif RATE_LIMIT_RE.search(res["result_text"]):
+        elif (result_obj.get("api_error_status") in (429, 529)
+              or RATE_LIMIT_RE.search(res["result_text"])):
+            # The plan-window refusal carries its 429 in a structured field and
+            # says "You've hit your session limit · resets ..." — neither
+            # matched the old regex; 83 runs fast-failed before this check.
             res["status"] = "rate_limited"
         elif TRANSIENT_RE.search(res["result_text"]):
             res["status"] = "transient"
