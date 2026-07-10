@@ -176,8 +176,14 @@ canon-file reads across all 45 B runs, all detected and reported).
 ### Spot-check on a stronger model
 
 A 5-task × 3-arm × 1-rep spot-check on a stronger model (the harder test for
-B, since stronger models grep well) — results recorded here when complete:
-*pending.*
+B, since stronger models grep well): **A 0.37 / B 0.81 / C 0.81** mean
+success — the quality edge over grep closes to a tie on this small sample
+(n=5, single rep), while the efficiency edge persists (**B −18% output
+tokens vs C**) and the knowledge effect stays dominant (B and C both ≈ +0.44
+over A). The primary fleet on the same five tasks: A 0.30 / B 0.88 / C 0.78.
+Reading: the stronger the model, the better it compensates for unstructured
+access by reading more — canonia's **quality** edge concentrates on
+cheaper/smaller models; its **cost** edge holds everywhere tested.
 
 ### Threats to validity
 
