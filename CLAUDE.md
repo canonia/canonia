@@ -30,8 +30,8 @@ advisory) before anything is written. **Deviation from the sqlite-vec plan:** ma
 system Python's `sqlite3` lacks loadable-extension support, so sqlite-vec can't load
 — `index.backend: sqlite` (brute force) is the working default; `sqlite-vec` is a
 reserved seam for large canons on an extension-capable Python. Docs in `docs/` (see
-`docs/indexing.md`). **Security:** the site has NO built-in auth (governance is
-future) — serve it privately (tailnet/loopback) or behind an auth edge; `.canonia/`
+`docs/indexing.md`). **Security:** the site has NO built-in auth (access
+control is deliberately out of the open core) — serve it privately (tailnet/loopback) or behind an auth edge; `.canonia/`
 (holds the derived index) is git-ignored. See docs/deploying.md.
 
 ## Key decisions
@@ -42,10 +42,11 @@ future) — serve it privately (tailnet/loopback) or behind an auth edge; `.cano
   judged an anti-pattern for async agent sessions).
 - **Reference, not copy.** Two link layers: `references:` frontmatter (the
   authoritative graph) + `[[id]]` inline (human prose).
-- **Governance (RBAC) is a FUTURE MODULE.** v1 ships open. Leave seams now: `domain`
-  on every concept, a no-op access filter in the server, a reserved `access:` config
-  namespace, web view behind an auth-capable edge (e.g. Cloudflare Access). Scope
-  **LLM identities too**, not just humans.
+- **Access control is deliberately OUT of the open core.** It ships open;
+  protection is the deployment's job (private serving / auth-capable edge, e.g.
+  Cloudflare Access). Keep the seams intact: `domain` on every concept, the no-op
+  access filter, the reserved `access:` config namespace. Any access layer built
+  on the seams must scope **LLM identities too**, not just humans.
 
 ## Concept schema
 
@@ -71,7 +72,7 @@ canonia/
   server.py         # MCP server (stdlib stdio): search/get/create/update + lifecycle
   index.py          # semantic index: ONNX MiniLM + WordPiece + sqlite/NumPy cosine
   site.py           # static site — self-contained HTML (not MkDocs; generator seam kept)
-  access.py         # SEAM: no-op access filter (governance module later)
+  access.py         # SEAM: no-op access filter (core ships without access control)
 docs/               # install / configure / maintain / use guide (dogfooded)
 ```
 
