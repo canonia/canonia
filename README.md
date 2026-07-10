@@ -7,8 +7,8 @@
 **schema**, the graph **gates** (schema + dangling-reference), the **importer**
 (`canonia import`), the **MCP server** (`canonia serve`), the optional local
 **semantic index** (`canonia index`), and the **static site** (`canonia build`).
-Governance/access control is a deliberate future module — until then, serve a
-canon **privately** (see [docs/deploying.md](docs/deploying.md)).
+Access control is deliberately left out of the open core — serve a canon
+**privately** (see [docs/deploying.md](docs/deploying.md)).
 
 ## The idea
 
@@ -104,8 +104,9 @@ Configuration for all of them lives in one file, `canonia.yml`
   one that doesn't exist yet (a warning); `canonia validate` is the hard gate for CI.
 - **Fully offline & private** — the semantic index runs a local ONNX model; a
   private canon never leaves your machine. The site makes **zero external requests**.
-- **Governance is a future module** — a no-op access seam (`access.py`) is wired
-  now and will scope humans *and* LLM identities later.
+- **Open by design, private by deployment** — the core ships without access
+  control; a no-op access seam (`access.py`) is wired on every read and write so
+  an access layer can attach without forking the core.
 
 ## Contributing / from source
 

@@ -80,8 +80,8 @@ mislabeled as an agent (their creates land as drafts), not the reverse.
 **Draft-by-default for agents.** Under an `llm` identity, `create` defaults to
 `status: draft` — still searchable and resolvable, just marked as awaiting
 human review (promote with `update`/`restore` semantics or edit the file). An
-explicit `status: active` in the call is honored; hard enforcement is the
-governance module's job.
+explicit `status: active` in the call is honored — draft-by-default is
+advisory in the open core, not enforced.
 
 **Versions (optimistic concurrency).** `get` returns a `version` token (a
 content hash). Pass it back as `update`'s `expected_version` and the update is
@@ -94,7 +94,8 @@ every write.
 
 ## Access control
 
-Reads currently run **open**; the governance module is future work. Both seams
-are wired as no-ops: `access.filter_concepts`/`can_access` on every read and
-`access.can_write` on every write/remove. Do not expose the server or its canon
-to untrusted callers yet — see [deploying](deploying.md).
+Reads run **open** — the open core deliberately ships without access control.
+The seams are wired as no-ops (`access.filter_concepts`/`can_access` on every
+read, `access.can_write` on every write/remove) so an access layer can attach
+without forking the core. Do not expose the server or its canon to untrusted
+callers — see [deploying](deploying.md).

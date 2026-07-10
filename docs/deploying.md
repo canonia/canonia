@@ -15,8 +15,8 @@ It has **zero external requests** (inline CSS/JS, no CDN) and is theme-aware.
 ## ⚠ The site has NO access control
 
 This is the single most important thing on this page. The generated site is plain
-static HTML with **no authentication of any kind**. Access control is the future
-**governance module**; until it ships, **whoever can reach the URL can read every
+static HTML with **no authentication of any kind**. The open core deliberately ships
+**without access control**, so **whoever can reach the URL can read every
 concept** — including anything sensitive in your canon. **You** are responsible for
 restricting access at the network / edge layer.
 
@@ -67,9 +67,9 @@ From a device that is **not** on your tailnet and **not** authenticated, the URL
 **refuse the connection or present an auth challenge — never render a page.** Check
 this every time you change how it's served.
 
-## When governance ships
+## Why an auth-capable edge
 
-The static site is designed to sit behind an **auth-capable edge** precisely so this
-transition is clean: the edge stays, and the governance module moves policy inside —
-per-domain and per-identity, scoping **LLM identities too**, not just humans. Until
-then, the edge is your only control. Use it.
+The static site is designed to sit behind an **auth-capable edge** — that is the
+intended access model for the open core, not a stopgap. The edge owns
+authentication and can carry per-identity policy (scoping **LLM identities too**,
+not just humans). The edge is your control. Use it.

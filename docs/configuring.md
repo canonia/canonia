@@ -40,8 +40,9 @@ import:                      # source repos the importer reads (dev-time)
     homelab:     {path: ../homelab}
     shared-lore: {path: ../shared-lore, prefix: canon}   # prefix prepended to mapping paths
 
-# access:                    # RESERVED — governance module (not implemented; v1 open).
-#   Future: per-domain / per-identity access control (humans AND LLM identities).
+# access:                    # RESERVED namespace — the open core ships without
+#   access control; the key is reserved so an access layer can attach later
+#   without breaking existing configs.
 ```
 
 ## Key reference

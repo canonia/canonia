@@ -229,6 +229,6 @@ writes allowed. See [maintaining](maintaining.md) and [serving](serving.md).
 
 ## Security
 
-The server currently runs **open** — no built-in auth, and the governance seam is a
-no-op in v1. Only connect agents/clients you trust, and keep the canon private. See
+The server runs **open** — the open core deliberately ships without built-in
+auth, and the `access.py` seam is a no-op. Only connect agents/clients you trust, and keep the canon private. See
 [deploying](deploying.md).
