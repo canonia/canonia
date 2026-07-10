@@ -7,9 +7,9 @@ server is the agent interface; a static site gives humans a browsable view; git
 provides versioning + authorship.
 
 > **Status: pre-alpha.** Schema, gates, importer, MCP server, static site, and the
-> local semantic index all work today. Access control (governance) is a **future
-> module** — see [deploying.md](deploying.md) for how to keep a canon private in the
-> meantime. **This matters: the site has no built-in auth.**
+> local semantic index all work today. Access control is deliberately **not part
+> of the open core** — see [deploying.md](deploying.md) for how to keep a canon
+> private. **This matters: the site has no built-in auth.**
 
 ## The pieces
 
@@ -26,6 +26,8 @@ Configuration for all of them lives in one file: [configuring.md](configuring.md
 Retiring concepts without breaking links: [lifecycle](lifecycle.md).
 Connecting **and instructing** your LLM to use the canon:
 [using-with-agents](using-with-agents.md).
+What it costs at scale and under concurrency: [performance](performance.md).
+Whether it measurably helps agents (it does — measured): [evaluation](evaluation.md).
 Publishing the framework to PyPI: [releasing](releasing.md).
 
 ## Quickstart

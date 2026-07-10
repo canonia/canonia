@@ -30,8 +30,8 @@ advisory) before anything is written. **Deviation from the sqlite-vec plan:** ma
 system Python's `sqlite3` lacks loadable-extension support, so sqlite-vec can't load
 — `index.backend: sqlite` (brute force) is the working default; `sqlite-vec` is a
 reserved seam for large canons on an extension-capable Python. Docs in `docs/` (see
-`docs/indexing.md`). **Security:** the site has NO built-in auth (governance is
-future) — serve it privately (tailnet/loopback) or behind an auth edge; `.canonia/`
+`docs/indexing.md`). **Security:** the site has NO built-in auth (access
+control is deliberately out of the open core) — serve it privately (tailnet/loopback) or behind an auth edge; `.canonia/`
 (holds the derived index) is git-ignored. See docs/deploying.md.
 
 ## Key decisions
@@ -42,10 +42,11 @@ future) — serve it privately (tailnet/loopback) or behind an auth edge; `.cano
   judged an anti-pattern for async agent sessions).
 - **Reference, not copy.** Two link layers: `references:` frontmatter (the
   authoritative graph) + `[[id]]` inline (human prose).
-- **Governance (RBAC) is a FUTURE MODULE.** v1 ships open. Leave seams now: `domain`
-  on every concept, a no-op access filter in the server, a reserved `access:` config
-  namespace, web view behind an auth-capable edge (e.g. Cloudflare Access). Scope
-  **LLM identities too**, not just humans.
+- **Access control is deliberately OUT of the open core.** It ships open;
+  protection is the deployment's job (private serving / auth-capable edge, e.g.
+  Cloudflare Access). Keep the seams intact: `domain` on every concept, the no-op
+  access filter, the reserved `access:` config namespace. Any access layer built
+  on the seams must scope **LLM identities too**, not just humans.
 
 ## Concept schema
 
@@ -71,7 +72,7 @@ canonia/
   server.py         # MCP server (stdlib stdio): search/get/create/update + lifecycle
   index.py          # semantic index: ONNX MiniLM + WordPiece + sqlite/NumPy cosine
   site.py           # static site — self-contained HTML (not MkDocs; generator seam kept)
-  access.py         # SEAM: no-op access filter (governance module later)
+  access.py         # SEAM: no-op access filter (core ships without access control)
 docs/               # install / configure / maintain / use guide (dogfooded)
 ```
 
@@ -91,22 +92,30 @@ Build order: **schema → importer** (seed + validate on real data) → server �
   canon equals the emitted set, so the gate previews the result). Default is
   add/update-only.
 
-## Known issues — READ docs/audit-2026-07.md before changing code
+## Behavior notes — measured limits live in docs/performance.md
 
-A full July-2026 audit (security + correctness + architecture, findings
-reproduced, not speculative) lives in **`docs/audit-2026-07.md`** — read it
-before non-trivial work; keep its statuses current when fixing items. Highlights
-still true until marked fixed there: unversioned updates are last-writer-wins
-(opt-in CAS exists: `get`'s `version` → `update`'s `expected_version`); MCP
-writes embed-on-write into the semantic index (degradations warn on the write
-result; `"unindexed": N` in search now flags only external edits/degraded
-writes until `canonia index build`);
-flat ids make future namespacing a migration — the separator is now reserved
-(`.`/`:` hard-rejected in every id regardless of `id_pattern`; the namespacing
-design itself is future work). **Trust layer (2026-07-09):** autocommit default ON; `serve --identity
-NAME --identity-kind llm|human` (or `$CANONIA_IDENTITY`) → git author
-`name <kind@canonia>`; named identities default to `llm`; LLM creates land as
-`status: draft`; server stamps `created`/`updated`.
+**Retrieval/task eval (2026-07-10, `evals/`):** the product premise measured —
+135 real agent runs, 15 tasks × 3 arms × 3 reps. Canon over MCP vs the same
+files as grep-able markdown: **+4.8 points success (95% CI excludes 0, zero
+per-task losses) at −21% output tokens, −18% wall time**; vs no knowledge:
++31 points. Value concentrates where facts have no local exemplar and in
+multi-concept conventions; mature exemplar-rich repos saturate (grep is
+enough there). Task pack is private (sibling repo); harness + aggregates are
+public. User-facing summary: docs/evaluation.md.
+
+Measured behavior (July 2026, pre-alpha), stated as facts to design against:
+unversioned updates are last-writer-wins; opt-in CAS exists (`get`'s
+`version` → `update`'s `expected_version`) and narrows but does not close the
+lost-update window under hot same-concept contention — numbers and practical
+guidance in `docs/performance.md`. MCP writes embed-on-write into the semantic
+index (degradations warn on the write result; `"unindexed": N` in search flags
+only external edits/degraded writes until `canonia index build`). Flat ids
+make future namespacing a migration — the separator is reserved (`.`/`:`
+hard-rejected in every id regardless of `id_pattern`; the namespacing design
+itself is future work). **Trust layer (2026-07-09):** autocommit default ON;
+`serve --identity NAME --identity-kind llm|human` (or `$CANONIA_IDENTITY`) →
+git author `name <kind@canonia>`; named identities default to `llm`; LLM
+creates land as `status: draft`; server stamps `created`/`updated`.
 
 ## Working agreements
 

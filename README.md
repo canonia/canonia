@@ -7,8 +7,8 @@
 **schema**, the graph **gates** (schema + dangling-reference), the **importer**
 (`canonia import`), the **MCP server** (`canonia serve`), the optional local
 **semantic index** (`canonia index`), and the **static site** (`canonia build`).
-Governance/access control is a deliberate future module — until then, serve a
-canon **privately** (see [docs/deploying.md](docs/deploying.md)).
+Access control is deliberately left out of the open core — serve a canon
+**privately** (see [docs/deploying.md](docs/deploying.md)).
 
 ## The idea
 
@@ -73,6 +73,11 @@ canonia build && open site/index.html
   LLM (Claude Code, Claude Desktop, Cursor, and other MCP clients) to actually use
   the canon.
 - **[indexing](docs/indexing.md)** — the offline semantic index and hybrid search.
+- **[performance](docs/performance.md)** — measured latency by canon size and
+  behavior under concurrent agents: real numbers, honest limits.
+- **[evaluation](docs/evaluation.md)** — does it actually help? 135 real agent
+  runs, canon-over-MCP vs "just grep the same files" vs nothing: **+5 points
+  success (never worse) at −21% tokens vs grep; +31 points vs no knowledge.**
 - **[deploying](docs/deploying.md)** — serve the canon **privately** (no built-in
   auth yet).
 
@@ -96,13 +101,15 @@ Configuration for all of them lives in one file, `canonia.yml`
 - **Reference, not copy** — two link layers: `references:` frontmatter (the
   authoritative graph the gate enforces) + `[[id]]` inline links in prose.
 - **No locking** — git merge / optimistic concurrency instead, so async agent
-  sessions never block each other.
+  sessions never block each other. Measured under real concurrent writers —
+  guarantees and limits in [performance](docs/performance.md).
 - **Permissive writes, strict gate** — agents can create a concept that references
   one that doesn't exist yet (a warning); `canonia validate` is the hard gate for CI.
 - **Fully offline & private** — the semantic index runs a local ONNX model; a
   private canon never leaves your machine. The site makes **zero external requests**.
-- **Governance is a future module** — a no-op access seam (`access.py`) is wired
-  now and will scope humans *and* LLM identities later.
+- **Open by design, private by deployment** — the core ships without access
+  control; a no-op access seam (`access.py`) is wired on every read and write so
+  an access layer can attach without forking the core.
 
 ## Contributing / from source
 
