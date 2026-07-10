@@ -63,7 +63,7 @@ summary: >                      # one line; shown in search hits + neighbour pre
 references:                     # outgoing graph edges (authoritative)
   - security-baseline
 source:                         # provenance — where this concept came from
-  - repo: ai-playbook
+  - repo: team-playbook
     path: guidelines/secrets_management.md
 ---
 

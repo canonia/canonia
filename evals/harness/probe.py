@@ -1,9 +1,9 @@
-"""P2-C5 latch guard.
+"""Hybrid-availability latch guard.
 
 `canonia serve` probes semantic-search availability once and latches: a server
 started before `canonia index build` never gains hybrid search until restart
-(internal July-2026 audit, finding P2-C5). An eval that misses this silently
-measures keyword-only while believing it measures hybrid.
+(a documented startup behavior — see docs/performance.md). An eval that
+misses this silently measures keyword-only while believing it measures hybrid.
 
 So: before ANY arm-B run counts, this probe spawns a fresh `canonia serve` on
 that run's own canon copy, issues a real `search` over the MCP stdio protocol

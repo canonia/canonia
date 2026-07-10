@@ -9,7 +9,7 @@ canon:
   root: concepts             # folder holding the domain subfolders (default: concepts)
   name: canon                # this canon's repo name; used as the provenance repo for
                              # concepts authored directly here (default: canon)
-  domains: [process, infra, ops, lore]   # the top-level domains == concept subfolders
+  domains: [process, infra, ops, product]   # the top-level domains == concept subfolders
 
 schema:
   id_pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"  # allowed concept ids (default shown)
@@ -36,12 +36,13 @@ index:
 
 import:                      # source repos the importer reads (dev-time)
   sources:                   # paths are relative to this file (or absolute)
-    ai-playbook: {path: ../ai-playbook}
-    homelab:     {path: ../homelab}
-    shared-lore: {path: ../shared-lore, prefix: canon}   # prefix prepended to mapping paths
+    team-playbook:  {path: ../team-playbook}
+    platform-infra: {path: ../platform-infra}
+    product-docs:   {path: ../product-docs, prefix: canon}   # prefix prepended to mapping paths
 
-# access:                    # RESERVED — governance module (not implemented; v1 open).
-#   Future: per-domain / per-identity access control (humans AND LLM identities).
+# access:                    # RESERVED namespace — the open core ships without
+#   access control; the key is reserved so an access layer can attach later
+#   without breaking existing configs.
 ```
 
 ## Key reference

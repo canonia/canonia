@@ -2,13 +2,13 @@
 
 Usage (from the canonia repo root, with the project venv's python):
 
-    .venv/bin/python -m evals.harness validate --pack ../canon-evals
-    .venv/bin/python -m evals.harness template --pack ../canon-evals
-    .venv/bin/python -m evals.harness run      --pack ../canon-evals [--tasks T01,T02]
+    .venv/bin/python -m evals.harness validate --pack <private-pack>
+    .venv/bin/python -m evals.harness template --pack <private-pack>
+    .venv/bin/python -m evals.harness run      --pack <private-pack> [--tasks T01,T02]
                                                [--arms A,B,C] [--reps 3] [--model ...]
                                                [--include-drafts]
-    .venv/bin/python -m evals.harness score    --pack ../canon-evals [--no-judge]
-    .venv/bin/python -m evals.harness report   --pack ../canon-evals
+    .venv/bin/python -m evals.harness score    --pack <private-pack> [--no-judge]
+    .venv/bin/python -m evals.harness report   --pack <private-pack>
 
 The pack (tasks, results, transcripts) is private and lives outside this repo;
 only aggregate numbers cross back in, by hand, after review.

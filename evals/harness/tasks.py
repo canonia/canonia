@@ -1,4 +1,4 @@
-"""Load and validate the private task pack (schema: canon-evals/README.md).
+"""Load and validate the private task pack (schema: the pack's README.md).
 
 The pack lives OUTSIDE this repo (prompts/rubrics/gold sets reference private
 canon content). This module is pure loading + validation; it never copies pack

@@ -6,7 +6,7 @@ index, or (arm C) a private copy of the concept files as plain markdown.
 Nothing writable is ever shared between runs.
 
 The canon template is built once per fleet: canon checkout at the pinned
-commit + `canonia index build` + a hybrid probe (P2-C5 guard). Runs then get
+commit + `canonia index build` + a hybrid probe (the hybrid-latch guard). Runs then get
 cheap copies of the template; arm B re-probes ITS copy before the agent starts.
 """
 import json
@@ -86,7 +86,7 @@ def git_export(repo, commit, dest):
 def build_canon_template(cfg, force=False):
     """Build (or reuse) the fleet's canon template; returns its path.
 
-    Refuses to return a template whose probe is not hybrid — the P2-C5 guard
+    Refuses to return a template whose probe is not hybrid — the hybrid-latch guard
     starts here and is repeated per arm-B run copy.
     """
     results = Path(cfg["pack_dir"]) / "results"
@@ -98,7 +98,7 @@ def build_canon_template(cfg, force=False):
         if template.exists():
             shutil.rmtree(template)
         git_export(cfg["canon_repo"], cfg["canon_commit"], canon)
-        # Index BEFORE any serve ever sees this canon (P2-C5: availability
+        # Index BEFORE any serve ever sees this canon (availability
         # latches at first use; the order build -> serve is load-bearing).
         r = subprocess.run(
             [cfg["canonia_bin"], "index", "build", "--canon", str(canon)],

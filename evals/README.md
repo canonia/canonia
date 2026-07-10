@@ -1,7 +1,6 @@
 # Retrieval/task eval — does a canon over MCP beat "CLAUDE.md + grep"?
 
-The July 2026 internal audit concluded
-that canonia's read side is RAG and must be **measured, not assumed** — the
+Canonia's read side is RAG and must be **measured, not assumed** — the
 competitive risk is not an incumbent product but *"CLAUDE.md + grep is good
 enough."* This eval is the artifact that settles it. If the canon does not
 beat the baselines, that negative result is the deliverable, reported with
@@ -71,12 +70,12 @@ copy (nothing writable is ever shared); pinned model; explicit
 exactly one MCP server and A/C get none. Runs are manifest-tracked and
 resumable; the fleet paces itself across subscription rate-limit windows.
 
-**Audit guards honored:**
-- **P2-C5 (availability latch):** `canonia index build` runs before any
+**Measurement guards:**
+- **Availability latch:** `canonia index build` runs before any
   server start, and every arm-B run copy is probed over real MCP stdio —
   the run is invalid unless the probe returns `"mode": "hybrid"`. A failed
   probe never silently downgrades to keyword-only.
-- **Measured as-is:** canonia is pinned at the audit-snapshot commit; nothing
+- **Measured as-is:** canonia is pinned at the snapshot commit; nothing
   on the retrieval path (keyword scorer, tool descriptions) was touched
   before measurement.
 - Preflight refuses to run with `ANTHROPIC_API_KEY` set (headless runs must

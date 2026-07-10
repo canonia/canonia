@@ -79,7 +79,7 @@ canonia build && open site/index.html
   runs, canon-over-MCP vs "just grep the same files" vs nothing: **+5 points
   success (never worse) at −21% tokens vs grep; +31 points vs no knowledge.**
 - **[deploying](docs/deploying.md)** — serve the canon **privately** (no built-in
-  auth yet).
+  auth).
 
 ## What each command does
 

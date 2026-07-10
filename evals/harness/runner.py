@@ -52,7 +52,7 @@ def preflight(cfg):
         problems.append(f"cannot diff against pinned {cfg['canonia_commit']!r}")
     elif drifted:
         problems.append("canonia measured paths drifted from the pinned commit "
-                        f"(eval must run the audit-snapshot code):\n{drifted}")
+                        f"(eval must run the pinned snapshot code):\n{drifted}")
     dirty = _cmd_out(["git", "-C", cfg["canonia_repo"], "status", "--porcelain",
                       "--", *measured])
     if dirty:
@@ -122,7 +122,7 @@ def run_one(cfg, task, arm, rep, model, out_root, template, preflight_info,
             frag = workspace.build_workspace(cfg, task, arm, run_dir / "ws", template)
             manifest.update(frag)
         except ProbeError as exc:
-            # P2-C5 guard tripped: this run must not be counted as hybrid.
+            # Hybrid-latch guard tripped: this run must not be counted as hybrid.
             manifest.update(status="invalid_probe", error=str(exc), ended=_now())
             _write(manifest_path, manifest)
             log(f"{run_id}: INVALID (hybrid probe failed) — {exc}")

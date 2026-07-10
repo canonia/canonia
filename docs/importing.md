@@ -48,8 +48,8 @@ Source repos come from `import.sources` in `canonia.yml` (see
 
 ```bash
 canonia import --mapping mapping.yml \
-  --source ai-playbook=../ai-playbook \
-  --source shared-lore=../shared-lore:canon      # name=path[:prefix]
+  --source team-playbook=../team-playbook \
+  --source product-docs=../product-docs:canon      # name=path[:prefix]
 ```
 
 ### Manifest shape
@@ -62,8 +62,8 @@ concepts:
     summary: Git-ignored .env; committed .env.example; day-one rotation.
     references: [security-baseline]
     source:                                  # multiple entries when several were DEDUPED into one
-      - {repo: ai-playbook, path: guidelines/secrets_management.md}
-      - {repo: homelab,     path: docs/architecture.md#configuration-secrets}
+      - {repo: team-playbook,  path: guidelines/secrets_management.md}
+      - {repo: platform-infra, path: docs/architecture.md#configuration-secrets}
 ```
 
 Any top-level key whose value is a list of concept entries is consumed (so batches
