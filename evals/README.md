@@ -33,8 +33,11 @@ detects and reports that rather than pretending it can't happen.
 
 ## Task set
 
-15 fixed tasks in three clusters — infra/ops (6), process (4), lore (5) —
-drawn from the maintainer's real repos, pinned to exact commits. Each task's
+15 fixed tasks in three knowledge clusters — infra/ops conventions (6),
+engineering process conventions (4), and **narrative** (5: writing tasks for a
+private creative project whose facts must stay consistent with an established
+reference canon) — drawn from the maintainer's real repos, pinned to exact
+commits. Each task's
 needed knowledge lives in full-bodied canon concepts and is **not derivable
 from the task snapshot** (local doc copies are scrubbed — simulating the
 post-adoption world — and every task records grep evidence plus any residual
@@ -97,8 +100,91 @@ stronger model verifies the direction holds where grep skills are strongest.
 .venv/bin/python -m evals.harness --pack <private-pack> report
 ```
 
-## Results
+## Results (fleet of 2026-07-09/10, 135 runs, all scorable)
 
-**Pending — the fleet has not run yet.** This section will carry the aggregate
-tables (per-arm success, paired comparisons, per-cluster breakdown, retrieval
-quality) and the honest interpretation, whichever way it lands.
+Primary fleet: `claude-sonnet-5`, 15 tasks × 3 arms × 3 reps. Every arm-B
+run's hybrid probe passed; agents used the MCP path faithfully (3 direct
+canon-file reads across all 45 B runs, all detected and reported).
+
+### Success and cost, by arm
+
+| Arm | Task-mean success | Median turns | Median wall | Median output tok | Retrieval recall / precision |
+|---|---|---|---|---|---|
+| A — no knowledge | 0.578 | 27 | 362 s | 28.2k | — |
+| **B — canonia over MCP** | **0.889** | 45 | **358 s** | **28.5k** | 0.77 / **0.78** |
+| C — same files, grep | 0.841 | 51 | 437 s | 36.2k | **0.90** / 0.66 |
+
+### Paired per-task comparisons (bootstrap 95% CI over tasks)
+
+| Pair | Mean diff | 95% CI | Wins / ties / losses |
+|---|---|---|---|
+| **B − C** | **+0.048** | **[0.019, 0.086]** | **4 / 11 / 0** |
+| C − A | +0.263 | [0.130, 0.405] | 10 / 5 / 0 |
+| B − A | +0.311 | [0.169, 0.462] | 11 / 4 / 0 |
+
+### Per-cluster task-mean success
+
+| Cluster | A | B | C |
+|---|---|---|---|
+| infra/ops (mature exemplar-rich repo) | 0.859 | 0.945 | 0.914 |
+| process conventions | 0.599 | 0.864 | 0.784 |
+| narrative (no local exemplars) | 0.224 | 0.842 | 0.799 |
+
+### Reading the numbers honestly
+
+1. **The knowledge itself is the dominant factor** (C−A = +26 points). Where
+   the needed facts have no local exemplar (narrative cluster), arm A scores
+   0.22 — the canon *is* the task.
+2. **Serving it over MCP beats grep on quality — modestly, reliably — and
+   clearly on cost.** B−C is +4.8 points with a CI excluding zero and **zero
+   losses in 15 tasks**, delivered at **21% fewer output tokens, 18% less
+   wall time, and 12% fewer turns**. C compensates by reading more (higher
+   recall, much lower precision) — it greps around and stuffs context until
+   it works; B searches, fetches the right concepts, and stops. Against the
+   baseline claim under test — "CLAUDE.md + grep is good enough" — the
+   honest verdict: *grep gets close on quality, but it is the expensive,
+   less-reliable way to be close.*
+3. **The use-case boundary is visible.** In a mature, convention-rich repo
+   (infra cluster) all arms score high — the repo teaches its own conventions
+   by example, and three tasks saturate to ties. The canon's read-side value
+   concentrates in **greenfield work, cross-repo knowledge, and facts without
+   local exemplars** — exactly the product's intended use.
+4. **Retrieval headroom is real.** B won while fetching only 77% of the gold
+   concepts — the known keyword-scorer weaknesses are visible in the data,
+   so retrieval improvements plausibly widen the gap. One task (T11) was
+   hard for every arm (B 0.38 / C 0.33 / A 0.00).
+
+### Per-task success (titles sanitized; prompts/rubrics are private)
+
+| Task | Cluster | A | B | C |
+|---|---|---|---|---|
+| T01 — add a public web service end-to-end | infra/ops | 1.000 | 1.000 | 1.000 |
+| T02 — add an automated, verified backup restore drill | infra/ops | 0.970 | 0.970 | 0.939 |
+| T03 — scoped DB credentials for a new scheduled job | infra/ops | 0.818 | 0.818 | 0.818 |
+| T04 — add CI to an ops repo | infra/ops | 0.792 | 0.917 | 0.792 |
+| T05 — rebuild weekly maintenance + OS update/reboot policy | infra/ops | 0.633 | 0.967 | 0.933 |
+| T06 — add a private, storage-heavy service | infra/ops | 0.939 | 1.000 | 1.000 |
+| T07 — write a proper CLAUDE.md for a docs-only repo | process | 0.762 | 0.857 | 0.857 |
+| T08 — prepare a personal repo to go public with contributors | process | 0.467 | 0.933 | 0.667 |
+| T09 — record a freshly settled convention durably | process | 0.167 | 0.667 | 0.611 |
+| T10 — design a small-model agent's tool surface | process | 1.000 | 1.000 | 1.000 |
+| T11 — consistency pass over design docs vs canonical facts | narrative | 0.000 | 0.375 | 0.333 |
+| T12 — write a planning brief whose facts must match canon | narrative | 0.143 | 1.000 | 0.905 |
+| T13 — draft a framing document consistent with established canon | narrative | 0.292 | 1.000 | 0.958 |
+| T14 — draft public-facing copy under strict factual constraints | narrative | 0.583 | 1.000 | 1.000 |
+| T15 — write reference entries for an established subject area | narrative | 0.100 | 0.833 | 0.800 |
+
+### Spot-check on a stronger model
+
+A 5-task × 3-arm × 1-rep spot-check on a stronger model (the harder test for
+B, since stronger models grep well) — results recorded here when complete:
+*pending.*
+
+### Threats to validity
+
+One canon (153 concepts), one maintainer's repos and conventions, n=15 tasks,
+one primary model; judged rubric items use a blind LLM judge (spot-checked by
+the maintainer); three tasks saturated (documented per-task by-example
+leakage in a mature source repo); the task pack is private, so third parties
+can reproduce the harness but not these exact numbers. The negative-result
+commitment held: numbers above are reported as measured, including the ties.

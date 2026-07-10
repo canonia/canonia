@@ -10,7 +10,7 @@ from pathlib import Path
 import yaml
 
 ARMS = ("A", "B", "C")
-CLUSTERS = ("infra-ops", "process", "lore")
+CLUSTERS = ("infra-ops", "process", "narrative")
 RUBRIC_KINDS = ("llm", "regex", "file_exists", "command")
 
 _TASK_ID_RE = re.compile(r"^T\d{2}$")

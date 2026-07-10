@@ -264,8 +264,8 @@ def _judge(cfg, task, template_dir, diff, final, llm_items, run_dir, log=print):
         task=str(task["prompt"]),
         rubric=rubric,
         excerpts="\n\n".join(excerpts),
-        diff=_blind(diff)[:DIFF_CAP],
-        final=_blind(final)[:FINAL_CAP],
+        diff=_blind(diff, cfg)[:DIFF_CAP],
+        final=_blind(final, cfg)[:FINAL_CAP],
     )
     attempt = content_retries = rate_waits = transient_retries = 0
     while True:
@@ -312,10 +312,10 @@ def _parse_verdicts(text):
     return data if isinstance(data, dict) else None
 
 
-def _blind(text):
+def _blind(text, cfg):
     """Strip arm-identifying instruction blocks from judge input."""
-    for block in (workspace.ARM_B_BLOCK, workspace.ARM_C_BLOCK):
-        for line in block.strip().splitlines():
+    for arm in ("B", "C"):
+        for line in workspace.arm_block(arm, cfg).strip().splitlines():
             if line.strip():
                 text = text.replace(line, "[project instructions]")
     return text

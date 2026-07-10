@@ -22,7 +22,10 @@ from .probe import probe_hybrid, ProbeError
 # B is the block docs/using-with-agents.md prescribes (connect + instruct);
 # C is the equivalent-strength pointer for the plain-markdown counterfactual.
 # Both name the same topics and say "source of truth" + "consult first".
-ARM_B_BLOCK = """
+# The topic/domain wording comes from the PRIVATE pack config
+# (knowledge_topics / knowledge_domains) so this public code names nothing
+# about any particular canon.
+ARM_B_TEMPLATE = """
 ## Canonical knowledge — use the `canonia` MCP server
 
 This project's durable, cross-repo knowledge lives in a canonical knowledge
@@ -30,8 +33,7 @@ store reachable through the `canonia` MCP tools. It is the source of truth —
 prefer it over your own memory or copied notes.
 
 **Before** answering a question or making a decision about a topic it may
-cover (our conventions, architecture, infra and ops runbooks, process rules,
-story lore — domains: process / infra / ops / lore), **consult it first**:
+cover ({topics} — domains: {domains}), **consult it first**:
 1. `search` for the topic (hybrid keyword + semantic).
 2. `get` the most relevant concept(s) by `id` to read the full body, its
    `references`, and its backlinks (`referenced_by`).
@@ -41,21 +43,27 @@ When you learn something durable and reusable, write it back with `create` /
 `update` rather than only noting it locally.
 """
 
-ARM_C_BLOCK = """
+ARM_C_TEMPLATE = """
 ## Project knowledge notes
 
 This project's durable, cross-repo knowledge lives as markdown notes in
-`../notes/` (one topic per file, organized by area: process / infra / ops /
-lore). The notes are the source of truth — prefer them over your own memory
-or copied notes.
+`../notes/` (one topic per file, organized by area: {domains}). The notes
+are the source of truth — prefer them over your own memory or copied notes.
 
 **Before** answering a question or making a decision about a topic the notes
-may cover (our conventions, architecture, infra and ops runbooks, process
-rules, story lore), **consult the notes first**: grep/read the relevant files
-and ground your work in what they say.
+may cover ({topics}), **consult the notes first**: grep/read the relevant
+files and ground your work in what they say.
 """
 
-ARM_BLOCKS = {"A": "", "B": ARM_B_BLOCK, "C": ARM_C_BLOCK}
+_TEMPLATES = {"A": "", "B": ARM_B_TEMPLATE, "C": ARM_C_TEMPLATE}
+
+
+def arm_block(arm, cfg):
+    return _TEMPLATES[arm].format(
+        topics=cfg.get("knowledge_topics",
+                       "our conventions, architecture, runbooks, and reference facts"),
+        domains=cfg.get("knowledge_domains", "all project domains"),
+    )
 
 
 class WorkspaceError(Exception):
@@ -135,7 +143,7 @@ def build_workspace(cfg, task, arm, ws_dir, template_dir):
             target.unlink()
         # A missing scrub target is fine: the pin may predate the path.
 
-    claude_md = str(task["claude_md"]).rstrip() + "\n" + ARM_BLOCKS[arm]
+    claude_md = str(task["claude_md"]).rstrip() + "\n" + arm_block(arm, cfg)
     (repo_dir / "CLAUDE.md").write_text(claude_md, encoding="utf-8")
 
     fragment = {"arm": arm, "ws": str(ws), "repo_snapshot": repo}
