@@ -84,8 +84,8 @@ def cmd_init(args) -> int:
     root = Path(args.directory).resolve()
     root.mkdir(parents=True, exist_ok=True)
     if args.domains:
-        # Strip whitespace around commas: "process, lore" must not create a
-        # ' lore' directory that mismatches the parsed domain name.
+        # Strip whitespace around commas: "process, notes" must not create a
+        # ' notes' directory that mismatches the parsed domain name.
         domains = [d.strip() for d in args.domains.split(",") if d.strip()]
         if not domains:
             print("--domains parsed to an empty list", file=sys.stderr)

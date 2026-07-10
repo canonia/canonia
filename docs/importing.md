@@ -68,7 +68,8 @@ concepts:
 
 Any top-level key whose value is a list of concept entries is consumed (so batches
 can live under different keys). A bare-string `source` (e.g. `characters/x.md`) is
-allowed for a batch with an implied repo.
+allowed for a batch whose implied repo is declared in a top-level
+`defaults:` map (`defaults: {<batch-key>: <repo-name>}`).
 
 ### Where bodies come from
 

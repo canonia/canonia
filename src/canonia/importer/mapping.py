@@ -65,20 +65,19 @@ class ConceptSpec:
         return self.sources[0] if self.sources else None
 
 
-# Maps the manifest's top-level list key -> the repo implied for bare paths.
-_DEFAULT_REPO_BY_KEY = {"lore": "shared-lore"}
-
-
 def load_mapping(path: Path, *, default_repo: Optional[str] = None) -> List[ConceptSpec]:
     """Load every concept entry from ``mapping.yml`` across all batch keys."""
     data = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+    # Optional top-level `defaults: {<batch-key>: <repo>}` supplies the repo
+    # implied for bare-path entries of that batch.
+    defaults = data.get("defaults") or {}
     specs: List[ConceptSpec] = []
     seen_ids = set()
 
     for key, value in data.items():
         if not isinstance(value, list):
             continue
-        implied_repo = default_repo or _DEFAULT_REPO_BY_KEY.get(key, "unknown")
+        implied_repo = default_repo or defaults.get(key, "unknown")
         for entry in value:
             if not isinstance(entry, dict) or "id" not in entry:
                 continue
