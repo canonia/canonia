@@ -112,5 +112,8 @@ a corrupted canon.
 
 Latency numbers say the machinery is fast; they don't prove agents retrieve
 the *right* concept and do better work with a canon than without one. That
-claim needs a retrieval/task eval, which is the top item on the roadmap —
-until it lands, treat retrieval quality as unmeasured.
+claim is **now measured** — 135 real agent runs, canon-over-MCP vs the same
+files as grep-able markdown vs no knowledge at all. Short version: same
+knowledge, +5 points task success (never worse) at 21% fewer output tokens;
+knowledge vs none is +31 points. Method, tables, and honest limits:
+[evaluation.md](evaluation.md).

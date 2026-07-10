@@ -20,9 +20,9 @@ static HTML with **no authentication of any kind**. The open core deliberately s
 concept** — including anything sensitive in your canon. **You** are responsible for
 restricting access at the network / edge layer.
 
-Treat the canon site as a **private service**. (If your canon migrated a homelab,
-this is exactly your own `private-services-behind-vpn` + `traefik-only-ingress`
-principles — apply them here.)
+Treat the canon site as a **private service**. (If your canon holds infra
+conventions like "private services behind a VPN" or "one ingress at the edge",
+this is exactly where you apply them.)
 
 ### Option A — Tailnet only (simplest, strongest for solo use)
 

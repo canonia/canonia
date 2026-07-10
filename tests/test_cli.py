@@ -76,11 +76,11 @@ def test_import_dry_run_still_reports_gate_failures(tmp_path: Path, capsys):
 def test_init_domains_strips_whitespace(tmp_path: Path):
     from canonia.cli import main as cli_main
     root = tmp_path / "canon"
-    rc = cli_main(["init", str(root), "--domains", "process, lore"])
+    rc = cli_main(["init", str(root), "--domains", "process, notes"])
     assert rc == 0
-    assert (root / "concepts" / "lore").is_dir()
-    assert not (root / "concepts" / " lore").exists()
-    assert "[process, lore]" in (root / "canonia.yml").read_text(encoding="utf-8")
+    assert (root / "concepts" / "notes").is_dir()
+    assert not (root / "concepts" / " notes").exists()
+    assert "[process, notes]" in (root / "canonia.yml").read_text(encoding="utf-8")
 
 
 def test_parse_sources_handles_windows_drive_colons():

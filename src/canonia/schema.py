@@ -33,7 +33,7 @@ DEFAULT_ID_PATTERN = r"^[a-z0-9]+(?:-[a-z0-9]+)*$"
 # namespacing into a breaking migration. Rejected in every id position
 # regardless of `schema.id_pattern` — a loosened pattern cannot re-admit them.
 RESERVED_ID_CHARS = ".:"
-DEFAULT_DOMAINS = ("process", "lore", "infra", "ops")
+DEFAULT_DOMAINS = ("process", "product", "infra", "ops")
 # Lifecycle states. active/draft/deprecated are live (resolve to themselves);
 # merged is a redirect tombstone (forwards via `redirect`); archived is dropped
 # from the active/searchable set but still on disk and still resolvable.
@@ -223,9 +223,9 @@ class Concept:
 def _normalize_source(source) -> List[Dict[str, str]]:
     """Coerce a frontmatter ``source`` value into ``[{repo, path}, ...]``.
 
-    Accepts the batch-1 form ``[{repo, path}]`` and the bare-string form used by
-    the lore batch (repo implied). Bare strings are left as ``{path: ...}`` and
-    the caller supplies the repo.
+    Accepts the ``[{repo, path}]`` form and the bare-string form (repo implied
+    by the mapping batch's default). Bare strings are left as ``{path: ...}``
+    and the caller supplies the repo.
     """
     if not source:
         return []

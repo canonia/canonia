@@ -26,6 +26,8 @@ Configuration for all of them lives in one file: [configuring.md](configuring.md
 Retiring concepts without breaking links: [lifecycle](lifecycle.md).
 Connecting **and instructing** your LLM to use the canon:
 [using-with-agents](using-with-agents.md).
+What it costs at scale and under concurrency: [performance](performance.md).
+Whether it measurably helps agents (it does — measured): [evaluation](evaluation.md).
 Publishing the framework to PyPI: [releasing](releasing.md).
 
 ## Quickstart
@@ -61,7 +63,7 @@ summary: >                      # one line; shown in search hits + neighbour pre
 references:                     # outgoing graph edges (authoritative)
   - security-baseline
 source:                         # provenance — where this concept came from
-  - repo: ai-playbook
+  - repo: team-playbook
     path: guidelines/secrets_management.md
 ---
 

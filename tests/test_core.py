@@ -62,7 +62,7 @@ def _good() -> Concept:
         domain="infra",
         summary="Never commit secrets.",
         references=["security-baseline"],
-        source=[{"repo": "ai-playbook", "path": "guidelines/secrets.md"}],
+        source=[{"repo": "team-playbook", "path": "guidelines/secrets.md"}],
         body="Body.",
     )
 

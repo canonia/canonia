@@ -9,7 +9,7 @@ canon:
   root: concepts             # folder holding the domain subfolders (default: concepts)
   name: canon                # this canon's repo name; used as the provenance repo for
                              # concepts authored directly here (default: canon)
-  domains: [process, infra, ops, lore]   # the top-level domains == concept subfolders
+  domains: [process, infra, ops, product]   # the top-level domains == concept subfolders
 
 schema:
   id_pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"  # allowed concept ids (default shown)
@@ -36,9 +36,9 @@ index:
 
 import:                      # source repos the importer reads (dev-time)
   sources:                   # paths are relative to this file (or absolute)
-    ai-playbook: {path: ../ai-playbook}
-    homelab:     {path: ../homelab}
-    shared-lore: {path: ../shared-lore, prefix: canon}   # prefix prepended to mapping paths
+    team-playbook:  {path: ../team-playbook}
+    platform-infra: {path: ../platform-infra}
+    product-docs:   {path: ../product-docs, prefix: canon}   # prefix prepended to mapping paths
 
 # access:                    # RESERVED namespace — the open core ships without
 #   access control; the key is reserved so an access layer can attach later
@@ -51,7 +51,7 @@ import:                      # source repos the importer reads (dev-time)
 |---|---|---|
 | `canon.root` | `concepts` | Directory (under the canon root) that holds domain folders. |
 | `canon.name` | `canon` | Provenance repo name for concepts authored in the canon (via the MCP `create` tool). |
-| `canon.domains` | `[process, lore, infra, ops]` | The valid domains; each is a subfolder of `canon.root`. A concept's `domain` must match its folder. |
+| `canon.domains` | `[process, product, infra, ops]` | The valid domains; each is a subfolder of `canon.root`. A concept's `domain` must match its folder. |
 | `schema.id_pattern` | `^[a-z0-9]+(?:-[a-z0-9]+)*$` | Regex every `id` (and reference) must match **in full** (`re.fullmatch`, so anchors are optional). `.` and `:` are reserved for future namespacing and rejected in every id **regardless of this pattern**. |
 | `git.autocommit` | `true` | Commit each MCP write locally (the audit trail). Never pushes. See [serving](serving.md). |
 | `mcp.name` | `canonia` | The server identity reported in the MCP handshake. |

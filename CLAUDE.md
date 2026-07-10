@@ -94,6 +94,15 @@ Build order: **schema → importer** (seed + validate on real data) → server �
 
 ## Behavior notes — measured limits live in docs/performance.md
 
+**Retrieval/task eval (2026-07-10, `evals/`):** the product premise measured —
+135 real agent runs, 15 tasks × 3 arms × 3 reps. Canon over MCP vs the same
+files as grep-able markdown: **+4.8 points success (95% CI excludes 0, zero
+per-task losses) at −21% output tokens, −18% wall time**; vs no knowledge:
++31 points. Value concentrates where facts have no local exemplar and in
+multi-concept conventions; mature exemplar-rich repos saturate (grep is
+enough there). Task pack is private (sibling repo); harness + aggregates are
+public. User-facing summary: docs/evaluation.md.
+
 Measured behavior (July 2026, pre-alpha), stated as facts to design against:
 unversioned updates are last-writer-wins; opt-in CAS exists (`get`'s
 `version` → `update`'s `expected_version`) and narrows but does not close the

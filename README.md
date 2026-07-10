@@ -75,8 +75,11 @@ canonia build && open site/index.html
 - **[indexing](docs/indexing.md)** — the offline semantic index and hybrid search.
 - **[performance](docs/performance.md)** — measured latency by canon size and
   behavior under concurrent agents: real numbers, honest limits.
+- **[evaluation](docs/evaluation.md)** — does it actually help? 135 real agent
+  runs, canon-over-MCP vs "just grep the same files" vs nothing: **+5 points
+  success (never worse) at −21% tokens vs grep; +31 points vs no knowledge.**
 - **[deploying](docs/deploying.md)** — serve the canon **privately** (no built-in
-  auth yet).
+  auth).
 
 ## What each command does
 

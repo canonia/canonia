@@ -25,8 +25,8 @@ class SourceRepo:
     """A repo the importer reads from: filesystem root + optional path prefix.
 
     ``prefix`` is prepended to every mapping ``path`` before it hits disk — e.g.
-    the lore canon lives under ``shared-lore/canon/`` while the mapping paths are
-    written relative to ``canon/``.
+    a source repo may keep its content under ``<repo>/canon/`` while the mapping
+    paths are written relative to ``canon/``.
     """
 
     path: Path

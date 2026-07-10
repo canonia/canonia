@@ -570,7 +570,7 @@ def test_stdio_unknown_method_is_protocol_error(tmp_path: Path):
     assert resp["error"]["code"] == -32601
 
 
-# --- low-audit regressions: merge edges, search inputs, arg types ------------
+# --- low-severity regressions: merge edges, search inputs, arg types ---------
 
 def test_merge_rejects_archived_target(tmp_path: Path):
     # Tombstones and archived concepts are both excluded from search, so a
