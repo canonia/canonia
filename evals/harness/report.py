@@ -43,8 +43,6 @@ def build_report(cfg, tasks, runs_root, out_dir, log=print):
 
     task_ids = sorted({t["id"] for t in tasks})
     task_meta = {t["id"]: t for t in tasks}
-    arms = sorted({s["arm"] for (_, s), _ in zip(by_task_arm.keys(), by_task_arm.keys())}) \
-        if by_task_arm else []
     arms = sorted({arm for (_, arm) in by_task_arm}) or ["A", "B", "C"]
 
     # task x arm cell = mean over reps

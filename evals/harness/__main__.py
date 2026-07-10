@@ -90,8 +90,11 @@ def main(argv=None):
         n = 0
         for mf in sorted(runs_root.glob("*/manifest.json")):
             run_dir = mf.parent
-            if (run_dir / "score.json").is_file() and not args.rescore:
-                continue
+            sp = run_dir / "score.json"
+            if sp.is_file() and not args.rescore:
+                # judge_failed scores are retried automatically; all others stand.
+                if json.loads(sp.read_text()).get("status") != "judge_failed":
+                    continue
             manifest = json.loads(mf.read_text())
             task = by_id.get(manifest["task"])
             if task is None:

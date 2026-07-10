@@ -11,6 +11,7 @@ Three scoring layers, strictly separated:
 import json
 import re
 import subprocess
+import time
 from pathlib import Path
 
 from . import claude_cli, workspace
@@ -74,6 +75,16 @@ def score_run(cfg, task, run_dir, template_dir, use_judge=True, log=print):
     if llm_items and use_judge:
         verdicts = _judge(cfg, task, template_dir, diff, final, llm_items,
                           run_dir, log=log)
+        if verdicts is None:
+            # A judge failure must NEVER count as an agent failure: mark the
+            # run unscored so reports exclude it and a later `score` pass
+            # retries it (learned the hard way — an 80-run window-exhaustion
+            # cascade briefly scored as mass rubric failures).
+            score = {"run_id": manifest["run_id"], "task": task["id"],
+                     "arm": manifest["arm"], "rep": manifest["rep"],
+                     "scorable": False, "status": "judge_failed"}
+            _write(run_dir / "score.json", score)
+            return score
         for item in llm_items:
             v = verdicts.get(item["id"], {})
             items[item["id"]] = {"kind": "llm", "pass": bool(v.get("pass")),
@@ -256,16 +267,38 @@ def _judge(cfg, task, template_dir, diff, final, llm_items, run_dir, log=print):
         diff=_blind(diff)[:DIFF_CAP],
         final=_blind(final)[:FINAL_CAP],
     )
-    for attempt in (1, 2):
+    attempt = content_retries = rate_waits = transient_retries = 0
+    while True:
+        attempt += 1
         res = claude_cli.run_claude(
             prompt=prompt, cwd=run_dir, model=cfg["models"]["judge"],
             transcript_path=run_dir / f"judge-{attempt}.json",
             max_turns=1, timeout_s=300, output_format="json")
+        if res["status"] == "rate_limited":
+            rate_waits += 1
+            if rate_waits > 18:
+                return None
+            log(f"{run_dir.name}: judge hit the plan window — pausing "
+                f"{cfg['rate_limit_wait_s']}s (wait {rate_waits}/18)")
+            time.sleep(int(cfg["rate_limit_wait_s"]))
+            continue
+        if res["status"] in ("transient", "timeout"):
+            transient_retries += 1
+            if transient_retries > 3:
+                return None
+            time.sleep(60)
+            continue
+        if res["status"] != "completed":
+            log(f"{run_dir.name}: judge call failed ({res['status']})")
+            return None
         verdicts = _parse_verdicts(res.get("result_text", ""))
         if verdicts is not None:
             return verdicts
-        log(f"{run_dir.name}: judge returned unparseable verdicts (attempt {attempt})")
-    return {}
+        content_retries += 1
+        log(f"{run_dir.name}: judge returned unparseable verdicts "
+            f"(content retry {content_retries}/2)")
+        if content_retries >= 2:
+            return None
 
 
 def _parse_verdicts(text):
